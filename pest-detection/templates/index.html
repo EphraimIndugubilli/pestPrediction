@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pest Detection System</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --green: #1D9E75;
+    --green-light: #E1F5EE;
+    --green-dark: #085041;
+    --amber: #EF9F27;
+    --red: #E24B4A;
+    --bg: #F7F6F2;
+    --surface: #FFFFFF;
+    --border: rgba(0,0,0,0.1);
+    --text: #1a1a1a;
+    --muted: #666;
+    --mono: 'DM Mono', monospace;
+    --sans: 'Syne', sans-serif;
+  }
+
+  body {
+    font-family: var(--sans);
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    padding: 2rem 1rem 4rem;
+  }
+
+  .container { max-width: 700px; margin: 0 auto; }
+
+  /* ── Header ── */
+  .header {
+    display: flex; align-items: center; gap: 14px;
+    margin-bottom: 2.5rem;
+    animation: fadeUp 0.5s ease both;
+  }
+
+  .logo {
+    width: 48px; height: 48px; border-radius: 14px;
+    background: var(--green);
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .logo svg { width: 26px; height: 26px; stroke: white; }
+
+  .header-text h1 { font-size: 22px; font-weight: 800; letter-spacing: -0.5px; }
+  .header-text p  { font-size: 13px; color: var(--muted); margin-top: 2px; }
+
+  .model-badge {
+    margin-left: auto; padding: 5px 12px;
+    border-radius: 99px;
+    font-family: var(--mono);
+    font-size: 11px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .model-badge.ok  { color: var(--green); border-color: var(--green); }
+  .model-badge.err { color: var(--red);   border-color: var(--red); }
+
+  /* ── Drop Zone ── */
+  .drop-zone {
+    border: 2px dashed var(--border);
+    border-radius: 20px;
+    background: var(--surface);
+    padding: 3rem 2rem;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.2s, background 0.2s, transform 0.15s;
+    animation: fadeUp 0.5s 0.1s ease both;
+  }
+
+  .drop-zone:hover, .drop-zone.drag-over {
+    border-color: var(--green);
+    background: var(--green-light);
+    transform: scale(1.005);
+  }
+
+  .drop-icon {
+    width: 56px; height: 56px; border-radius: 16px;
+    background: var(--green-light);
+    display: flex; align-items: center; justify-content: center;
+    margin: 0 auto 1rem;
+  }
+  .drop-icon svg { width: 28px; height: 28px; stroke: var(--green); }
+
+  .drop-zone h2 { font-size: 17px; font-weight: 700; margin-bottom: 6px; }
+  .drop-zone p  { font-size: 13px; color: var(--muted); }
+
+  .browse-btn {
+    display: inline-block;
+    margin-top: 14px; padding: 9px 22px;
+    border-radius: 10px;
+    border: 1.5px solid var(--border);
+    background: var(--surface);
+    font-family: var(--sans);
+    font-size: 13px; font-weight: 600;
+    cursor: pointer; color: var(--text);
+    transition: background 0.15s, border-color 0.15s;
+  }
+  .browse-btn:hover { border-color: var(--green); background: var(--green-light); }
+
+  #file-input { display: none; }
+
+  /* ── Preview ── */
+  .preview-wrap {
+    display: none; margin-top: 1.5rem;
+    border-radius: 16px; overflow: hidden;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    animation: fadeUp 0.35s ease both;
+  }
+  .preview-wrap.show { display: block; }
+
+  .preview-wrap img {
+    width: 100%; max-height: 320px;
+    object-fit: cover; display: block;
+  }
+
+  .preview-meta {
+    padding: 10px 16px; display: flex;
+    align-items: center; justify-content: space-between;
+    border-top: 1px solid var(--border);
+    font-family: var(--mono); font-size: 12px; color: var(--muted);
+  }
+
+  .change-btn {
+    font-family: var(--mono); font-size: 11px;
+    color: var(--green); cursor: pointer;
+    background: none; border: none; padding: 0;
+  }
+  .change-btn:hover { text-decoration: underline; }
+
+  /* ── Analyze Button ── */
+  .analyze-btn {
+    display: none; width: 100%; margin-top: 1rem;
+    padding: 15px; border: none; border-radius: 14px;
+    background: var(--green); color: #fff;
+    font-family: var(--sans); font-size: 15px; font-weight: 700;
+    letter-spacing: 0.2px; cursor: pointer;
+    transition: opacity 0.2s, transform 0.1s;
+    animation: fadeUp 0.35s ease both;
+  }
+  .analyze-btn.show { display: block; }
+  .analyze-btn:hover  { opacity: 0.88; }
+  .analyze-btn:active { transform: scale(0.99); }
+  .analyze-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+  /* ── Result Card ── */
+  .result-card {
+    display: none; margin-top: 1.5rem;
+    border-radius: 20px; overflow: hidden;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    animation: fadeUp 0.4s ease both;
+  }
+  .result-card.show { display: block; }
+
+  /* Loading */
+  .loading {
+    display: none; padding: 2.5rem;
+    text-align: center;
+  }
+  .loading.show { display: block; }
+  .spinner {
+    width: 36px; height: 36px;
+    border: 3px solid #e0e0e0;
+    border-top-color: var(--green);
+    border-radius: 50%;
+    animation: spin 0.75s linear infinite;
+    margin: 0 auto 14px;
+  }
+  .loading p { font-size: 13px; color: var(--muted); }
+
+  /* Result header */
+  .result-header {
+    padding: 14px 20px;
+    display: flex; align-items: center; gap: 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  .dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .dot-green  { background: var(--green); }
+  .dot-red    { background: var(--red); }
+  .dot-amber  { background: var(--amber); }
+  .result-header span { font-size: 14px; font-weight: 600; }
+
+  /* Result body */
+  .result-body { padding: 20px; }
+
+  .pest-name {
+    font-size: 26px; font-weight: 800;
+    letter-spacing: -0.5px; margin-bottom: 4px;
+    text-transform: capitalize;
+  }
+
+  /* Confidence bar */
+  .conf-wrap { margin: 14px 0; }
+  .conf-label {
+    font-family: var(--mono); font-size: 12px;
+    color: var(--muted); margin-bottom: 6px;
+  }
+  .conf-track {
+    height: 6px; background: #eee;
+    border-radius: 99px; overflow: hidden;
+  }
+  .conf-fill {
+    height: 100%; border-radius: 99px;
+    background: var(--green);
+    transition: width 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .conf-fill.mid  { background: var(--amber); }
+  .conf-fill.low  { background: var(--red); }
+
+  /* Detail grid */
+  .detail-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px; margin-top: 16px;
+  }
+
+  .tile {
+    background: var(--bg);
+    border-radius: 12px; padding: 13px 15px;
+  }
+  .tile-label {
+    font-family: var(--mono);
+    font-size: 10px; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.6px;
+    margin-bottom: 6px;
+  }
+  .tile-value { font-size: 14px; font-weight: 600; line-height: 1.4; }
+
+  .full-width { grid-column: span 2; }
+
+  /* Notes */
+  .notes-box {
+    margin-top: 14px; padding: 14px 16px;
+    background: var(--green-light);
+    border-radius: 12px;
+    font-size: 13px; line-height: 1.65;
+    color: var(--green-dark);
+  }
+
+  /* Top-3 */
+  .top3-title {
+    font-family: var(--mono); font-size: 11px;
+    color: var(--muted); text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin: 18px 0 8px;
+  }
+
+  .top3-list { display: flex; flex-direction: column; gap: 6px; }
+
+  .top3-row {
+    display: flex; align-items: center; gap: 10px;
+    font-size: 13px;
+  }
+
+  .top3-row .name {
+    width: 130px; flex-shrink: 0;
+    font-weight: 500; text-transform: capitalize;
+  }
+
+  .top3-track {
+    flex: 1; height: 4px; background: #eee;
+    border-radius: 99px; overflow: hidden;
+  }
+  .top3-fill { height: 100%; background: var(--green); border-radius: 99px; }
+  .top3-row .pct {
+    font-family: var(--mono); font-size: 11px;
+    color: var(--muted); width: 38px; text-align: right;
+  }
+
+  /* Uncertain box */
+  .uncertain-box {
+    padding: 24px 20px; text-align: center;
+  }
+  .uncertain-box p { font-size: 14px; color: var(--muted); line-height: 1.7; }
+
+  /* Error */
+  .error-strip {
+    display: none; margin-top: 1rem;
+    padding: 12px 16px; border-radius: 12px;
+    background: #FCEBEB; color: #A32D2D;
+    font-size: 13px; line-height: 1.5;
+  }
+  .error-strip.show { display: block; }
+
+  /* Reset */
+  .reset-btn {
+    display: none; margin-top: 1rem;
+    padding: 9px 20px; border-radius: 9px;
+    border: 1.5px solid var(--border);
+    background: transparent; cursor: pointer;
+    font-family: var(--sans); font-size: 13px;
+    color: var(--muted); transition: background 0.15s;
+  }
+  .reset-btn.show { display: inline-block; }
+  .reset-btn:hover { background: var(--surface); }
+
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(10px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <!-- Header -->
+  <div class="header">
+    <div class="logo">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 2a9 9 0 0 1 7 14.5"/><path d="M12 2a9 9 0 0 0-7 14.5"/>
+        <path d="M12 22v-4"/><path d="M9 18h6"/><circle cx="12" cy="11" r="3"/>
+      </svg>
+    </div>
+    <div class="header-text">
+      <h1>Pest Detection System</h1>
+      <p>Upload a leaf photo — your CNN model identifies the pest</p>
+    </div>
+    <div class="model-badge" id="modelBadge">checking...</div>
+  </div>
+
+  <!-- Drop Zone -->
+  <div class="drop-zone" id="dropZone">
+    <div class="drop-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="3" width="18" height="18" rx="3"/>
+        <circle cx="8.5" cy="8.5" r="1.5"/>
+        <path d="M21 15l-5-5L5 21"/>
+      </svg>
+    </div>
+    <h2>Drop a leaf image here</h2>
+    <p>JPG, PNG or WEBP &mdash; close-up of the affected leaf works best</p>
+    <button class="browse-btn" onclick="document.getElementById('file-input').click()">Browse files</button>
+    <input type="file" id="file-input" accept="image/*">
+  </div>
+
+  <!-- Preview -->
+  <div class="preview-wrap" id="previewWrap">
+    <img id="previewImg" src="" alt="Uploaded leaf preview">
+    <div class="preview-meta">
+      <span id="imgMeta"></span>
+      <button class="change-btn" onclick="document.getElementById('file-input').click()">change image</button>
+    </div>
+  </div>
+
+  <!-- Error -->
+  <div class="error-strip" id="errorStrip"></div>
+
+  <!-- Analyze -->
+  <button class="analyze-btn" id="analyzeBtn" onclick="runAnalysis()">
+    &#x2699;&#xFE0F; Analyze for pests
+  </button>
+
+  <!-- Result -->
+  <div class="result-card" id="resultCard">
+    <div class="loading" id="loadingWrap">
+      <div class="spinner"></div>
+      <p>Running inference on your CNN model…</p>
+    </div>
+    <div id="resultContent"></div>
+  </div>
+
+  <button class="reset-btn" id="resetBtn" onclick="resetAll()">&#8592; Start over</button>
+
+</div>
+
+<script>
+const API = "http://127.0.0.1:8000";
+let currentFile = null;
+
+// ── Check model status on load ──
+(async () => {
+  const badge = document.getElementById("modelBadge");
+  try {
+    const r = await fetch(`${API}/status`);
+    const d = await r.json();
+    if (d.model_loaded) {
+      badge.textContent = `model ready · ${d.num_classes} classes`;
+      badge.classList.add("ok");
+    } else {
+      badge.textContent = "model not loaded";
+      badge.classList.add("err");
+    }
+  } catch {
+    badge.textContent = "server offline";
+    badge.classList.add("err");
+  }
+})();
+
+// ── Drag & Drop ──
+const dropZone = document.getElementById("dropZone");
+dropZone.addEventListener("dragover",  e => { e.preventDefault(); dropZone.classList.add("drag-over"); });
+dropZone.addEventListener("dragleave", () => dropZone.classList.remove("drag-over"));
+dropZone.addEventListener("drop", e => {
+  e.preventDefault(); dropZone.classList.remove("drag-over");
+  const f = e.dataTransfer.files[0];
+  if (f && f.type.startsWith("image/")) loadFile(f);
+});
+
+document.getElementById("file-input").addEventListener("change", function() {
+  if (this.files[0]) loadFile(this.files[0]);
+});
+
+function loadFile(file) {
+  currentFile = file;
+  clearError();
+  const reader = new FileReader();
+  reader.onload = e => {
+    document.getElementById("previewImg").src = e.target.result;
+    document.getElementById("imgMeta").textContent =
+      `${file.name}  ·  ${(file.size / 1024).toFixed(0)} KB`;
+    show("previewWrap");
+    show("analyzeBtn");
+    hide("resultCard");
+    hide("resetBtn");
+    document.getElementById("resultContent").innerHTML = "";
+  };
+  reader.readAsDataURL(file);
+}
+
+// ── Analysis ──
+async function runAnalysis() {
+  if (!currentFile) return;
+  const btn = document.getElementById("analyzeBtn");
+  btn.disabled = true;
+  show("resultCard");
+  show("loadingWrap", "loading");
+  document.getElementById("resultContent").innerHTML = "";
+  clearError();
+
+  const form = new FormData();
+  form.append("file", currentFile);
+
+  try {
+    const res  = await fetch(`${API}/predict`, { method: "POST", body: form });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Server error");
+    hide("loadingWrap", "loading");
+    renderResult(data);
+  } catch (err) {
+    hide("loadingWrap", "loading");
+    hide("resultCard");
+    showError("Could not reach the backend. Make sure the FastAPI server is running on port 8000.<br><code>uvicorn main:app --reload</code>");
+  }
+
+  btn.disabled = false;
+  show("resetBtn");
+}
+
+// ── Render result ──
+function renderResult(r) {
+  const el = document.getElementById("resultContent");
+
+  if (r.status === "uncertain") {
+    el.innerHTML = `
+      <div class="result-header">
+        <div class="dot dot-amber"></div>
+        <span>Uncertain — could not make a confident prediction</span>
+      </div>
+      <div class="uncertain-box">
+        <p>${r.reason}<br><br>
+        <strong>Tips:</strong> Use a close-up photo of the affected leaf area in good lighting.
+        Make sure the leaf fills most of the frame.</p>
+      </div>`;
+    return;
+  }
+
+  const conf = Math.round(r.confidence);
+  const fillClass = conf >= 75 ? "" : conf >= 50 ? "mid" : "low";
+
+  const top3Html = (r.top3 || []).map(t => `
+    <div class="top3-row">
+      <span class="name">${t.class}</span>
+      <div class="top3-track"><div class="top3-fill" style="width:${t.confidence}%"></div></div>
+      <span class="pct">${t.confidence}%</span>
+    </div>`).join("");
+
+  el.innerHTML = `
+    <div class="result-header">
+      <div class="dot dot-red"></div>
+      <span>Pest detected</span>
+    </div>
+    <div class="result-body">
+      <div class="pest-name">${r.pest_name}</div>
+      <div class="conf-wrap">
+        <div class="conf-label">Confidence: ${conf}%</div>
+        <div class="conf-track">
+          <div class="conf-fill ${fillClass}" style="width:${conf}%"></div>
+        </div>
+      </div>
+      <div class="detail-grid">
+        <div class="tile">
+          <div class="tile-label">Pesticide</div>
+          <div class="tile-value">${r.pesticide}</div>
+        </div>
+        <div class="tile">
+          <div class="tile-label">Dosage &amp; Method</div>
+          <div class="tile-value">${r.dose}</div>
+        </div>
+        ${r.severity_note ? `
+        <div class="tile full-width">
+          <div class="tile-label">Advisory</div>
+          <div class="tile-value" style="font-weight:400">${r.severity_note}</div>
+        </div>` : ""}
+      </div>
+      ${r.severity_note ? `<div class="notes-box">&#x26A0;&#xFE0F; ${r.severity_note}</div>` : ""}
+      ${top3Html ? `<div class="top3-title">Top predictions</div>
+        <div class="top3-list">${top3Html}</div>` : ""}
+    </div>`;
+}
+
+// ── Helpers ──
+function show(id, cls = "show") { document.getElementById(id).classList.add(cls); }
+function hide(id, cls = "show") { document.getElementById(id).classList.remove(cls); }
+function showError(msg) {
+  const el = document.getElementById("errorStrip");
+  el.innerHTML = msg; el.classList.add("show");
+}
+function clearError() { document.getElementById("errorStrip").classList.remove("show"); }
+
+function resetAll() {
+  currentFile = null;
+  document.getElementById("file-input").value = "";
+  document.getElementById("previewImg").src = "";
+  hide("previewWrap"); hide("analyzeBtn"); hide("resultCard"); hide("resetBtn");
+  document.getElementById("resultContent").innerHTML = "";
+  document.getElementById("analyzeBtn").disabled = false;
+  clearError();
+}
+</script>
+</body>
+</html>
