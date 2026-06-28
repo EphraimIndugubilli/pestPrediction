@@ -73,12 +73,56 @@ def preprocess(image_bytes: bytes) -> np.ndarray:
     return np.expand_dims(arr, 0)
 
 
+TREATMENT_URGENCY = {
+    'Late_blight': 'critical',
+    'Early_blight': 'high',
+    'Black_rot': 'high',
+    'Bacterial_spot': 'high',
+    'Common_rust_': 'high',
+    'Northern_Leaf_Blight': 'medium',
+    'Cercospora_leaf_spot': 'medium',
+    'Powdery_mildew': 'medium',
+    'Leaf_scorch': 'medium',
+    'Leaf_Mold': 'medium',
+    'Septoria_leaf_spot': 'medium',
+    'Spider_mites': 'medium',
+    'Target_Spot': 'medium',
+    'Esca_(Black_Measles)': 'high',
+    'Haunglongbing_(Citrus_greening)': 'critical',
+    'Tomato_Yellow_Leaf_Curl_Virus': 'critical',
+    'Tomato_mosaic_virus': 'high',
+    'Cedar_apple_rust': 'medium',
+    'Isariopsis_Leaf_Spot': 'medium',
+}
+
+CONFIDENCE_THRESHOLDS = {
+    'high': 75.0,
+    'medium': 45.0,
+}
+
+
+def confidence_level(score: float) -> str:
+    if score >= CONFIDENCE_THRESHOLDS['high']:
+        return 'high'
+    if score >= CONFIDENCE_THRESHOLDS['medium']:
+        return 'medium'
+    return 'low'
+
+
 def format_label(raw: str) -> dict:
     parts = raw.split('___')
     crop = parts[0].replace('_', ' ')
     condition = parts[1].replace('_', ' ') if len(parts) > 1 else raw
     healthy = 'healthy' in condition.lower()
-    return {'crop': crop, 'condition': condition, 'healthy': healthy, 'raw': raw}
+
+    urgency = 'none' if healthy else 'low'
+    if not healthy:
+        for keyword, level in TREATMENT_URGENCY.items():
+            if keyword.lower().replace('_', ' ') in condition.lower():
+                urgency = level
+                break
+
+    return {'crop': crop, 'condition': condition, 'healthy': healthy, 'raw': raw, 'urgency': urgency}
 
 
 @app.route('/')
@@ -104,7 +148,8 @@ def predict():
         idxs = random.sample(range(len(LABELS)), 3)
         probs = sorted([random.uniform(0.5, 0.99), random.uniform(0.01, 0.4), random.uniform(0.001, 0.1)], reverse=True)
         predictions = [
-            {**format_label(LABELS[i]), 'confidence': round(p * 100, 2)}
+            {**format_label(LABELS[i]), 'confidence': round(p * 100, 2),
+             'confidence_level': confidence_level(round(p * 100, 2))}
             for i, p in zip(idxs, probs)
         ]
         return jsonify({'predictions': predictions, 'demo': True})
@@ -114,7 +159,8 @@ def predict():
         preds = model.predict(arr, verbose=0)[0]
         top3 = np.argsort(preds)[::-1][:3]
         predictions = [
-            {**format_label(LABELS[i]), 'confidence': round(float(preds[i]) * 100, 2)}
+            {**format_label(LABELS[i]), 'confidence': round(float(preds[i]) * 100, 2),
+             'confidence_level': confidence_level(round(float(preds[i]) * 100, 2))}
             for i in top3
         ]
         return jsonify({'predictions': predictions, 'demo': False})
