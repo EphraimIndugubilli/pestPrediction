@@ -83,6 +83,11 @@
     margin: 0 auto .75rem;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
+  .loading-stages { display: flex; flex-direction: column; gap: .4rem; margin-top: .75rem; text-align: left; display: inline-flex; }
+  .lstage { display: flex; align-items: center; gap: .55rem; font-size: .78rem; color: var(--muted); transition: color .35s; }
+  .lstage.active { color: var(--green); }
+  .lstage.done { color: #86efac; }
+  .lstage-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
 
   /* Results */
   #results { display: none; margin-top: 2rem; animation: fadeUp .4s ease both; }
@@ -167,6 +172,12 @@
   <div id="loading">
     <div class="spinner"></div>
     <p style="color:var(--muted);font-size:.875rem">Analyzing leaf…</p>
+    <div class="loading-stages">
+      <div class="lstage" id="ls-upload"><div class="lstage-dot"></div>Uploading image</div>
+      <div class="lstage" id="ls-preprocess"><div class="lstage-dot"></div>Preprocessing (224×224)</div>
+      <div class="lstage" id="ls-infer"><div class="lstage-dot"></div>Running model inference</div>
+      <div class="lstage" id="ls-rank"><div class="lstage-dot"></div>Ranking predictions</div>
+    </div>
   </div>
 
   <div id="error-msg"></div>
@@ -215,12 +226,35 @@ function setFile(file) {
   errorMsg.style.display = 'none';
 }
 
+const STAGE_IDS = ['ls-upload', 'ls-preprocess', 'ls-infer', 'ls-rank'];
+const STAGE_DELAYS = [0, 400, 900, 1800]; // ms after start to activate each stage
+let stageTimers = [];
+
+function startStages() {
+  STAGE_IDS.forEach(id => document.getElementById(id).className = 'lstage');
+  stageTimers.forEach(clearTimeout);
+  stageTimers = [];
+  STAGE_IDS.forEach((id, i) => {
+    stageTimers.push(setTimeout(() => {
+      if (i > 0) document.getElementById(STAGE_IDS[i - 1]).className = 'lstage done';
+      document.getElementById(id).className = 'lstage active';
+    }, STAGE_DELAYS[i]));
+  });
+}
+
+function finishStages() {
+  stageTimers.forEach(clearTimeout);
+  stageTimers = [];
+  STAGE_IDS.forEach(id => document.getElementById(id).className = 'lstage done');
+}
+
 analyzeBtn.addEventListener('click', async () => {
   if (!selectedFile) return;
   analyzeBtn.disabled = true;
   loading.style.display = 'block';
   results.style.display = 'none';
   errorMsg.style.display = 'none';
+  startStages();
 
   const fd = new FormData();
   fd.append('image', selectedFile);
@@ -229,6 +263,7 @@ analyzeBtn.addEventListener('click', async () => {
     const res = await fetch('/predict', { method: 'POST', body: fd });
     const data = await res.json();
     if (!res.ok || data.error) throw new Error(data.error || 'Prediction failed');
+    finishStages();
     renderResults(data);
   } catch (err) {
     errorMsg.textContent = err.message;
