@@ -168,6 +168,58 @@ def predict():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/batch', methods=['POST'])
+def batch_predict():
+    """Batch prediction: process up to 10 images in one request.
+
+    Modern REST pattern — avoids per-image round-trip latency. Send images
+    as multipart form-data with field name 'images' (repeat the field for
+    each file). Returns an ordered list of predictions matching the input.
+    """
+    files = request.files.getlist('images')
+    if not files or all(not f.filename for f in files):
+        return jsonify({'error': 'No images uploaded. Use field name "images" (repeatable).'}), 400
+
+    MAX_BATCH = 10
+    if len(files) > MAX_BATCH:
+        return jsonify({'error': f'Batch capped at {MAX_BATCH} images per request. Got {len(files)}.'}), 400
+
+    model = load_model()
+    results = []
+
+    for file in files:
+        if not file.filename or not allowed(file.filename):
+            results.append({'filename': file.filename or 'unknown', 'error': 'Invalid file type — use PNG, JPG, JPEG, WEBP, or BMP.'})
+            continue
+        try:
+            image_bytes = file.read()
+            if model is None:
+                import random
+                random.seed(len(image_bytes) % 100)
+                idxs = random.sample(range(len(LABELS)), 3)
+                probs = sorted([random.uniform(0.5, 0.99), random.uniform(0.01, 0.4), random.uniform(0.001, 0.1)], reverse=True)
+                predictions = [
+                    {**format_label(LABELS[i]), 'confidence': round(p * 100, 2),
+                     'confidence_level': confidence_level(round(p * 100, 2))}
+                    for i, p in zip(idxs, probs)
+                ]
+                results.append({'filename': file.filename, 'predictions': predictions, 'demo': True})
+            else:
+                arr = preprocess(image_bytes)
+                preds = model.predict(arr, verbose=0)[0]
+                top3 = np.argsort(preds)[::-1][:3]
+                predictions = [
+                    {**format_label(LABELS[i]), 'confidence': round(float(preds[i]) * 100, 2),
+                     'confidence_level': confidence_level(round(float(preds[i]) * 100, 2))}
+                    for i in top3
+                ]
+                results.append({'filename': file.filename, 'predictions': predictions, 'demo': False})
+        except Exception as e:
+            results.append({'filename': file.filename, 'error': str(e)})
+
+    return jsonify({'count': len(results), 'results': results})
+
+
 @app.route('/health')
 def health():
     return jsonify({
