@@ -6,6 +6,8 @@ Loads a TensorFlow/Keras .h5 model and serves predictions via a browser UI.
 import os
 import io
 import json
+import time
+from collections import deque, Counter
 import numpy as np
 from flask import Flask, request, jsonify, render_template, send_from_directory
 from werkzeug.exceptions import HTTPException
@@ -111,6 +113,71 @@ def confidence_level(score: float) -> str:
     return 'low'
 
 
+class PredictionMonitor:
+    """In-memory drift/quality monitor for served predictions.
+
+    Keeps a rolling window of recent top-1 predictions so /stats can surface
+    class distribution and confidence trends without a database — the kind
+    of lightweight model-monitoring loop teams add once a model is in
+    production and they need to notice drift or quality regressions early.
+    """
+
+    def __init__(self, window_size: int = 500):
+        self.window_size = window_size
+        self.history = deque(maxlen=window_size)
+        self.total_predictions = 0
+        self.total_low_confidence = 0
+        self.started_at = time.time()
+
+    def record(self, top_prediction: dict, demo: bool):
+        self.total_predictions += 1
+        if top_prediction.get('confidence_level') == 'low':
+            self.total_low_confidence += 1
+        self.history.append({
+            'raw': top_prediction.get('raw'),
+            'crop': top_prediction.get('crop'),
+            'condition': top_prediction.get('condition'),
+            'healthy': top_prediction.get('healthy'),
+            'confidence': top_prediction.get('confidence'),
+            'confidence_level': top_prediction.get('confidence_level'),
+            'demo': demo,
+            'timestamp': time.time(),
+        })
+
+    def stats(self) -> dict:
+        n = len(self.history)
+        if n == 0:
+            return {
+                'window_size': self.window_size,
+                'samples_in_window': 0,
+                'total_predictions': self.total_predictions,
+                'total_low_confidence': self.total_low_confidence,
+                'avg_confidence': None,
+                'low_confidence_rate': None,
+                'healthy_rate': None,
+                'class_distribution': {},
+                'uptime_seconds': round(time.time() - self.started_at, 1),
+            }
+        confidences = [h['confidence'] for h in self.history]
+        low_count = sum(1 for h in self.history if h['confidence_level'] == 'low')
+        healthy_count = sum(1 for h in self.history if h['healthy'])
+        class_counts = Counter(h['raw'] for h in self.history)
+        return {
+            'window_size': self.window_size,
+            'samples_in_window': n,
+            'total_predictions': self.total_predictions,
+            'total_low_confidence': self.total_low_confidence,
+            'avg_confidence': round(sum(confidences) / n, 2),
+            'low_confidence_rate': round(low_count / n * 100, 2),
+            'healthy_rate': round(healthy_count / n * 100, 2),
+            'class_distribution': dict(class_counts.most_common(10)),
+            'uptime_seconds': round(time.time() - self.started_at, 1),
+        }
+
+
+MONITOR = PredictionMonitor()
+
+
 def format_label(raw: str) -> dict:
     parts = raw.split('___')
     crop = parts[0].replace('_', ' ')
@@ -156,6 +223,7 @@ def predict():
              'confidence_level': confidence_level(round(p * 100, 2))}
             for i, p in zip(idxs, probs)
         ]
+        MONITOR.record(predictions[0], demo=True)
         return jsonify({'predictions': predictions, 'demo': True})
 
     try:
@@ -167,6 +235,7 @@ def predict():
              'confidence_level': confidence_level(round(float(preds[i]) * 100, 2))}
             for i in top3
         ]
+        MONITOR.record(predictions[0], demo=False)
         return jsonify({'predictions': predictions, 'demo': False})
     except (IOError, OSError, ValueError) as e:
         return jsonify({'error': f'Could not process image: {e}'}), 400
@@ -213,6 +282,7 @@ def batch_predict():
                      'confidence_level': confidence_level(round(p * 100, 2))}
                     for i, p in zip(idxs, probs)
                 ]
+                MONITOR.record(predictions[0], demo=True)
                 results.append({'filename': file.filename, 'predictions': predictions, 'demo': True})
             else:
                 arr = preprocess(image_bytes)
@@ -223,6 +293,7 @@ def batch_predict():
                      'confidence_level': confidence_level(round(float(preds[i]) * 100, 2))}
                     for i in top3
                 ]
+                MONITOR.record(predictions[0], demo=False)
                 results.append({'filename': file.filename, 'predictions': predictions, 'demo': False})
         except (IOError, OSError, ValueError) as e:
             results.append({'filename': file.filename, 'error': f'Could not process image: {e}'})
@@ -262,6 +333,18 @@ def health():
         'model_path': MODEL_PATH,
         'classes': len(LABELS),
     })
+
+
+@app.route('/stats')
+def stats():
+    """Lightweight model-monitoring endpoint.
+
+    Reports rolling class distribution, average confidence, and low-confidence
+    rate over the most recent predictions — the kind of drift/quality signal
+    an MLOps governance setup checks to catch a model silently degrading in
+    production before it becomes a support ticket.
+    """
+    return jsonify(MONITOR.stats())
 
 
 if __name__ == '__main__':
