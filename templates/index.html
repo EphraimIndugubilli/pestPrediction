@@ -221,14 +221,28 @@ dropZone.addEventListener('drop', e => {
 
 fileInput.addEventListener('change', () => { if (fileInput.files[0]) setFile(fileInput.files[0]); });
 
+const MAX_FILE_SIZE_MB = 10;
+
 function setFile(file) {
+  errorMsg.style.display = 'none';
+
+  if (!file.type.startsWith('image/')) {
+    errorMsg.textContent = 'Please choose an image file (PNG, JPG, JPEG, WEBP, or BMP).';
+    errorMsg.style.display = 'block';
+    return;
+  }
+  if (file.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
+    errorMsg.textContent = `Image is too large (${(file.size / (1024 * 1024)).toFixed(1)} MB). Max size is ${MAX_FILE_SIZE_MB} MB.`;
+    errorMsg.style.display = 'block';
+    return;
+  }
+
   selectedFile = file;
   const url = URL.createObjectURL(file);
   previewImg.src = url;
   previewWrap.style.display = 'block';
   analyzeBtn.style.display = 'block';
   results.style.display = 'none';
-  errorMsg.style.display = 'none';
 }
 
 const STAGE_IDS = ['ls-upload', 'ls-preprocess', 'ls-infer', 'ls-rank'];
@@ -266,12 +280,22 @@ analyzeBtn.addEventListener('click', async () => {
 
   try {
     const res = await fetch('/predict', { method: 'POST', body: fd });
-    const data = await res.json();
-    if (!res.ok || data.error) throw new Error(data.error || 'Prediction failed');
+
+    let data;
+    try {
+      data = await res.json();
+    } catch {
+      throw new Error(`Server returned an unexpected response (status ${res.status}). Please try again.`);
+    }
+
+    if (!res.ok || data.error) throw new Error(data.error || `Prediction failed (status ${res.status}).`);
     finishStages();
     renderResults(data);
   } catch (err) {
-    errorMsg.textContent = err.message;
+    const isNetworkError = err instanceof TypeError;
+    errorMsg.textContent = isNetworkError
+      ? 'Could not reach the server. Check your connection and try again.'
+      : err.message;
     errorMsg.style.display = 'block';
   } finally {
     loading.style.display = 'none';

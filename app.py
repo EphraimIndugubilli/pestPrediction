@@ -8,10 +8,12 @@ import io
 import json
 import numpy as np
 from flask import Flask, request, jsonify, render_template, send_from_directory
+from werkzeug.exceptions import HTTPException
 from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024  # 10 MB
+MAX_CONTENT_LENGTH_MB = app.config['MAX_CONTENT_LENGTH'] // (1024 * 1024)
 
 # --- Model loading (lazy, on first request) ---
 MODEL = None
@@ -139,6 +141,8 @@ def predict():
         return jsonify({'error': 'Invalid file type. Use PNG, JPG, JPEG, WEBP, or BMP.'}), 400
 
     image_bytes = file.read()
+    if not image_bytes:
+        return jsonify({'error': 'Uploaded file is empty.'}), 400
     model = load_model()
 
     if model is None:
@@ -164,8 +168,11 @@ def predict():
             for i in top3
         ]
         return jsonify({'predictions': predictions, 'demo': False})
+    except (IOError, OSError, ValueError) as e:
+        return jsonify({'error': f'Could not process image: {e}'}), 400
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        app.logger.exception('Prediction failed')
+        return jsonify({'error': 'Prediction failed due to an internal error.'}), 500
 
 
 @app.route('/batch', methods=['POST'])
@@ -193,6 +200,9 @@ def batch_predict():
             continue
         try:
             image_bytes = file.read()
+            if not image_bytes:
+                results.append({'filename': file.filename, 'error': 'Uploaded file is empty.'})
+                continue
             if model is None:
                 import random
                 random.seed(len(image_bytes) % 100)
@@ -214,10 +224,34 @@ def batch_predict():
                     for i in top3
                 ]
                 results.append({'filename': file.filename, 'predictions': predictions, 'demo': False})
-        except Exception as e:
-            results.append({'filename': file.filename, 'error': str(e)})
+        except (IOError, OSError, ValueError) as e:
+            results.append({'filename': file.filename, 'error': f'Could not process image: {e}'})
+        except Exception:
+            app.logger.exception('Batch prediction failed for %s', file.filename)
+            results.append({'filename': file.filename, 'error': 'Prediction failed due to an internal error.'})
 
     return jsonify({'count': len(results), 'results': results})
+
+
+@app.errorhandler(413)
+def handle_too_large(e):
+    return jsonify({'error': f'Image too large. Max upload size is {MAX_CONTENT_LENGTH_MB} MB.'}), 413
+
+
+@app.errorhandler(404)
+def handle_not_found(e):
+    return jsonify({'error': 'Not found.'}), 404
+
+
+@app.errorhandler(HTTPException)
+def handle_http_exception(e):
+    return jsonify({'error': e.description or e.name}), e.code
+
+
+@app.errorhandler(Exception)
+def handle_unexpected_error(e):
+    app.logger.exception('Unhandled error')
+    return jsonify({'error': 'Internal server error. Please try again.'}), 500
 
 
 @app.route('/health')
