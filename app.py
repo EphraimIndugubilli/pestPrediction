@@ -325,6 +325,209 @@ def handle_unexpected_error(e):
     return jsonify({'error': 'Internal server error. Please try again.'}), 500
 
 
+DISEASE_KB: dict = {
+    "apple scab": {
+        "pathogen": "Venturia inaequalis (fungus)",
+        "symptoms": "Olive-green to brown scabby lesions on leaves and fruit; premature leaf drop.",
+        "spread": "Rain splash and wind disperse ascospores and conidia during wet spring weather.",
+        "treatment": [
+            "Apply captan, myclobutanil, or mancozeb fungicide at bud-break and every 7–14 days during wet periods.",
+            "Remove and destroy fallen infected leaves to reduce spore load.",
+            "Plant scab-resistant varieties (e.g. Liberty, Enterprise) where possible.",
+        ],
+        "prevention": "Ensure good air circulation; avoid overhead irrigation.",
+        "urgency": "high",
+        "organic_option": "Sulfur or copper-based sprays applied preventively.",
+    },
+    "black rot": {
+        "pathogen": "Botryosphaeria obtusa (fungus)",
+        "symptoms": "Circular brown lesions with purple borders on leaves; mummified fruit; cankers on branches.",
+        "spread": "Spores released from mummified fruit and dead wood during warm wet weather.",
+        "treatment": [
+            "Remove mummified fruit and cankers; prune infected wood 15 cm below visible lesions.",
+            "Apply captan or thiophanate-methyl during pink bud to petal-fall.",
+        ],
+        "prevention": "Sanitation is key — eliminate all overwintering inoculum.",
+        "urgency": "high",
+        "organic_option": "Copper hydroxide sprays; aggressive pruning and sanitation.",
+    },
+    "cedar apple rust": {
+        "pathogen": "Gymnosporangium juniperi-virginianae (fungus)",
+        "symptoms": "Bright orange spots on upper leaf surface; tube-like spore structures beneath.",
+        "spread": "Two-host cycle requiring both apple/crabapple and eastern red cedar (juniper).",
+        "treatment": [
+            "Myclobutanil or propiconazole fungicides from pink stage through third cover spray.",
+            "Remove nearby juniper hosts if feasible.",
+        ],
+        "prevention": "Plant rust-resistant apple varieties; create distance from junipers.",
+        "urgency": "medium",
+        "organic_option": "Sulfur sprays (preventive only, not after infection).",
+    },
+    "late blight": {
+        "pathogen": "Phytophthora infestans (oomycete)",
+        "symptoms": "Water-soaked grey-green lesions on leaves rapidly turning brown; white mold under leaves; tuber/fruit rot.",
+        "spread": "Airborne sporangia; extremely rapid spread in cool (10–25°C) wet conditions.",
+        "treatment": [
+            "Apply mancozeb, chlorothalonil, or metalaxyl-M preventively before symptoms appear.",
+            "Remove and destroy infected plant material immediately — do not compost.",
+            "Avoid overhead irrigation; improve air flow.",
+        ],
+        "prevention": "Use certified disease-free seed; resistant varieties; monitor forecasts.",
+        "urgency": "critical",
+        "organic_option": "Copper-based fungicides (bordeaux mixture) applied preventively.",
+    },
+    "early blight": {
+        "pathogen": "Alternaria solani (fungus)",
+        "symptoms": "Dark brown concentric-ring lesions ('target spots') on older leaves; defoliation from bottom up.",
+        "spread": "Wind and rain splash from soil and infected debris.",
+        "treatment": [
+            "Chlorothalonil, mancozeb, or azoxystrobin applied every 7–10 days after first symptoms.",
+            "Remove lower infected leaves; mulch to reduce soil splash.",
+        ],
+        "prevention": "Crop rotation (3-year); avoid wetting foliage; adequate plant spacing.",
+        "urgency": "high",
+        "organic_option": "Copper octanoate or neem oil; remove infected tissue promptly.",
+    },
+    "powdery mildew": {
+        "pathogen": "Podosphaera xanthii / Erysiphe spp. (fungi)",
+        "symptoms": "White powdery coating on leaves, stems and buds; distorted growth; premature drop.",
+        "spread": "Wind-dispersed conidia; thrives in warm dry days with cool nights and high humidity.",
+        "treatment": [
+            "Sulfur, potassium bicarbonate, or myclobutanil at 7–14 day intervals.",
+            "Neem oil as a contact killer of existing colonies.",
+        ],
+        "prevention": "Good air circulation; avoid excess nitrogen fertilization; resistant varieties.",
+        "urgency": "medium",
+        "organic_option": "Baking soda spray (1 tbsp/L water); potassium bicarbonate; neem oil.",
+    },
+    "bacterial spot": {
+        "pathogen": "Xanthomonas spp. (bacterium)",
+        "symptoms": "Small water-soaked lesions becoming angular, dark, and scab-like on leaves and fruit.",
+        "spread": "Rain splash; infected transplants and seeds; thrives above 24°C in wet conditions.",
+        "treatment": [
+            "Copper bactericide sprays (copper hydroxide or copper sulfate) every 7 days during wet periods.",
+            "Remove heavily infected plants; avoid working in wet crops.",
+        ],
+        "prevention": "Use disease-free seed; resistant pepper/tomato varieties; drip irrigation.",
+        "urgency": "high",
+        "organic_option": "Copper-based sprays are the primary organic option.",
+    },
+    "common rust": {
+        "pathogen": "Puccinia sorghi (fungus)",
+        "symptoms": "Oval to elongated, brick-red pustules on both leaf surfaces; pustules turn dark-brown as season progresses.",
+        "spread": "Wind-dispersed urediniospores; rapid spread in cool (16–23°C) humid weather.",
+        "treatment": [
+            "Azoxystrobin, propiconazole, or trifloxystrobin foliar application at first sign.",
+            "Early-season infections require prompt treatment to prevent yield loss.",
+        ],
+        "prevention": "Plant resistant hybrids; monitor from tassel emergence.",
+        "urgency": "high",
+        "organic_option": "No highly effective organic option; resistant varieties are the best defence.",
+    },
+    "northern leaf blight": {
+        "pathogen": "Exserohilum turcicum (fungus)",
+        "symptoms": "Cigar-shaped, greyish-green to tan lesions (2.5–15 cm long) starting on lower leaves.",
+        "spread": "Wind and rain splash; favoured by moderate temperatures and high humidity.",
+        "treatment": [
+            "Strobilurin or triazole fungicides at VT/early silk if disease is present on 3rd leaf below ear.",
+            "Economic threshold: treat when >50% of plants show infection before silking.",
+        ],
+        "prevention": "Resistant hybrids (single-copy Ht genes); crop rotation; tillage to bury residue.",
+        "urgency": "medium",
+        "organic_option": "Limited — copper fungicides have low efficacy; rely on resistant varieties.",
+    },
+    "leaf mold": {
+        "pathogen": "Passalora fulva / Cladosporium fulvum (fungus)",
+        "symptoms": "Pale-green to yellow spots on upper leaf; olive to grey-green mold growth beneath.",
+        "spread": "Airborne conidia; greenhouse tomatoes most affected; thrives >85% humidity.",
+        "treatment": [
+            "Chlorothalonil or mancozeb spray every 5–7 days.",
+            "Reduce greenhouse humidity below 85%; increase ventilation.",
+        ],
+        "prevention": "Resistant varieties (Cf genes); remove and destroy infected leaves.",
+        "urgency": "medium",
+        "organic_option": "Copper-based sprays; aggressive humidity management.",
+    },
+    "tomato yellow leaf curl virus": {
+        "pathogen": "Tomato yellow leaf curl virus — TYLCV (begomovirus, whitefly-vectored)",
+        "symptoms": "Upward leaf curling; yellowing of leaf margins; stunted growth; flower drop; no effective cure post-infection.",
+        "spread": "Transmitted exclusively by silverleaf whitefly (Bemisia tabaci); not mechanically transmitted.",
+        "treatment": [
+            "No cure — remove and destroy infected plants immediately to limit spread.",
+            "Control whitefly vector with imidacloprid, pymetrozine, or insecticidal soap.",
+            "Yellow sticky traps to monitor whitefly populations.",
+        ],
+        "prevention": "Resistant/tolerant varieties; reflective mulch to deter whiteflies; insect-proof netting in seedling stage.",
+        "urgency": "critical",
+        "organic_option": "Neem oil, insecticidal soap, or pyrethrin against whitefly; reflective mulch.",
+    },
+    "septoria leaf spot": {
+        "pathogen": "Septoria lycopersici (fungus)",
+        "symptoms": "Small circular spots with dark-brown border and white-grey center; tiny black pycnidia visible in lesion center.",
+        "spread": "Rain splash from soil or infected debris; moves up plant rapidly in wet weather.",
+        "treatment": [
+            "Chlorothalonil or mancozeb sprays every 7–10 days after first symptoms.",
+            "Remove infected lower leaves to slow upward progression.",
+        ],
+        "prevention": "Mulch to prevent soil splash; avoid overhead watering; crop rotation 3+ years.",
+        "urgency": "medium",
+        "organic_option": "Copper octanoate; remove infected tissue; mulching.",
+    },
+    "haunglongbing": {
+        "pathogen": "Candidatus Liberibacter asiaticus (bacterium, psyllid-vectored)",
+        "symptoms": "Blotchy mottled yellowing ('yellow dragon'); lopsided, bitter, undersized fruit; eventually tree decline and death.",
+        "spread": "Asian citrus psyllid (Diaphorina citri); no cure exists for infected trees.",
+        "treatment": [
+            "No cure — infected trees should be removed and destroyed to prevent spread.",
+            "Control psyllid vector with systemic insecticides (imidacloprid, thiamethoxam).",
+            "Nutritional programmes can prolong productive life of mildly affected trees.",
+        ],
+        "prevention": "Certified disease-free nursery stock; psyllid monitoring and control; quarantine.",
+        "urgency": "critical",
+        "organic_option": "Kaolin clay to reduce psyllid feeding; no effective organic cure.",
+    },
+}
+
+def _normalize_disease_key(name: str) -> str:
+    return name.lower().replace('_', ' ').replace('-', ' ').strip()
+
+
+@app.route('/disease-info/<path:name>')
+def disease_info(name: str):
+    """Return structured treatment and pathology data for a named disease.
+
+    Supports both raw PlantVillage label format (e.g. Tomato___Late_blight)
+    and human-readable names (e.g. late blight). Returns a 404 with the
+    closest partial matches if the disease is not in the knowledge base —
+    following the 2026 MLOps pattern of agentic context enrichment where
+    the inference API also serves the knowledge needed to act on its output.
+    """
+    key = _normalize_disease_key(name)
+    if '___' in key:
+        parts = key.split('___')
+        key = parts[1] if len(parts) > 1 else key
+
+    if key in DISEASE_KB:
+        info = DISEASE_KB[key]
+        return jsonify({
+            'disease': key.title(),
+            'pathogen': info['pathogen'],
+            'symptoms': info['symptoms'],
+            'spread': info['spread'],
+            'treatment': info['treatment'],
+            'prevention': info['prevention'],
+            'urgency': info['urgency'],
+            'organic_option': info['organic_option'],
+        })
+
+    matches = [d for d in DISEASE_KB if key in d or any(w in d for w in key.split())]
+    return jsonify({
+        'error': f'No data for "{name}".',
+        'did_you_mean': matches[:3],
+        'available': sorted(DISEASE_KB.keys()),
+    }), 404
+
+
 @app.route('/health')
 def health():
     return jsonify({
