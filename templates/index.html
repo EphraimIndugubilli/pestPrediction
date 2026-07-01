@@ -163,7 +163,7 @@
   <div id="drop-zone" role="button" tabindex="0" aria-label="Upload plant image">
     <div class="icon">🍃</div>
     <p><strong>Drag &amp; drop</strong> a leaf photo here</p>
-    <p style="margin-top:.4rem">or <strong>click to browse</strong> · PNG, JPG, WEBP · max 10 MB</p>
+    <p style="margin-top:.4rem">or <strong>click to browse</strong> · or <strong>paste</strong> from clipboard · PNG, JPG, WEBP · max 10 MB</p>
     <input type="file" id="file-input" accept="image/*" />
   </div>
 
@@ -266,6 +266,14 @@ function finishStages() {
   stageTimers = [];
   STAGE_IDS.forEach(id => document.getElementById(id).className = 'lstage done');
 }
+
+// Clipboard paste: Ctrl+V / ⌘+V anywhere on the page drops an image directly
+document.addEventListener('paste', (e) => {
+  const item = Array.from(e.clipboardData?.items || []).find(i => i.type.startsWith('image/'));
+  if (!item) return;
+  const file = item.getAsFile();
+  if (file) setFile(file);
+});
 
 analyzeBtn.addEventListener('click', async () => {
   if (!selectedFile) return;
