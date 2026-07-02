@@ -178,6 +178,74 @@ class PredictionMonitor:
 MONITOR = PredictionMonitor()
 
 
+def assess_image_quality(image_bytes: bytes) -> dict:
+    """Score an uploaded image for prediction-readiness before inference.
+
+    2026 MLOps best practice: validate input quality at the boundary before
+    spending compute on a prediction that is likely to produce low confidence.
+    Returns a quality_score (0-100) and a list of quality_flags describing
+    any detected issues (blur, darkness, low resolution, clipping).
+    """
+    try:
+        from PIL import Image, ImageStat
+        import math
+        img = Image.open(io.BytesIO(image_bytes)).convert('RGB')
+        w, h = img.size
+        flags: list[str] = []
+        score = 100
+
+        # Resolution check
+        if w < 64 or h < 64:
+            flags.append('very_low_resolution')
+            score -= 40
+        elif w < 128 or h < 128:
+            flags.append('low_resolution')
+            score -= 20
+
+        # Brightness check — mean pixel value across channels
+        stat = ImageStat.Stat(img)
+        mean_brightness = sum(stat.mean) / 3.0
+        if mean_brightness < 30:
+            flags.append('too_dark')
+            score -= 25
+        elif mean_brightness > 225:
+            flags.append('overexposed')
+            score -= 20
+
+        # Blur check — variance of per-channel standard deviations.
+        # Low std-dev across all channels means a flat/uniform or blurry image.
+        avg_stddev = sum(stat.stddev) / 3.0
+        if avg_stddev < 10:
+            flags.append('likely_blurry_or_uniform')
+            score -= 30
+        elif avg_stddev < 20:
+            flags.append('low_contrast')
+            score -= 10
+
+        score = max(0, min(100, score))
+        quality_level = 'good' if score >= 70 else 'fair' if score >= 40 else 'poor'
+
+        return {
+            'quality_score': score,
+            'quality_level': quality_level,
+            'quality_flags': flags,
+            'image_width': w,
+            'image_height': h,
+            'mean_brightness': round(mean_brightness, 1),
+            'contrast_stddev': round(avg_stddev, 1),
+        }
+    except Exception:
+        return {
+            'quality_score': None,
+            'quality_level': 'unknown',
+            'quality_flags': ['assessment_failed'],
+            'image_width': None,
+            'image_height': None,
+            'mean_brightness': None,
+            'contrast_stddev': None,
+        }
+
+
 def format_label(raw: str) -> dict:
     parts = raw.split('___')
     crop = parts[0].replace('_', ' ')
@@ -210,6 +278,8 @@ def predict():
     image_bytes = file.read()
     if not image_bytes:
         return jsonify({'error': 'Uploaded file is empty.'}), 400
+
+    quality = assess_image_quality(image_bytes)
     model = load_model()
 
     if model is None:
@@ -224,7 +294,7 @@ def predict():
             for i, p in zip(idxs, probs)
         ]
         MONITOR.record(predictions[0], demo=True)
-        return jsonify({'predictions': predictions, 'demo': True})
+        return jsonify({'predictions': predictions, 'demo': True, 'image_quality': quality})
 
     try:
         arr = preprocess(image_bytes)
@@ -236,7 +306,7 @@ def predict():
             for i in top3
         ]
         MONITOR.record(predictions[0], demo=False)
-        return jsonify({'predictions': predictions, 'demo': False})
+        return jsonify({'predictions': predictions, 'demo': False, 'image_quality': quality})
     except (IOError, OSError, ValueError) as e:
         return jsonify({'error': f'Could not process image: {e}'}), 400
     except Exception as e:
