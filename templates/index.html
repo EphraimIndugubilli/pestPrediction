@@ -130,6 +130,29 @@
     color: var(--yellow); font-size: .8rem; text-align: center;
   }
 
+  .treatment-btn {
+    display: inline-flex; align-items: center; gap: .4rem;
+    margin-top: .875rem; padding: .45rem .9rem; border-radius: .6rem;
+    border: 1px solid rgba(74,222,128,0.3); background: rgba(74,222,128,0.06);
+    color: var(--green); font-size: .78rem; font-weight: 600; cursor: pointer;
+    transition: background .15s, border-color .15s;
+  }
+  .treatment-btn:hover { background: rgba(74,222,128,0.12); border-color: rgba(74,222,128,0.5); }
+  .treatment-btn:disabled { opacity: .5; cursor: wait; }
+
+  .treatment-guide {
+    margin-top: .875rem; padding: .875rem 1rem; border-radius: .875rem;
+    background: rgba(74,222,128,0.04); border: 1px solid rgba(74,222,128,0.15);
+    font-size: .8rem; line-height: 1.6;
+  }
+  .treatment-guide h4 { color: var(--green); font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; margin-bottom: .4rem; margin-top: .7rem; }
+  .treatment-guide h4:first-child { margin-top: 0; }
+  .treatment-guide ul { margin: 0; padding-left: 1.2rem; }
+  .treatment-guide li { margin-bottom: .25rem; color: var(--text); }
+  .treatment-guide p { margin: 0; color: var(--text); }
+  .treatment-guide .pathogen { color: var(--muted); font-style: italic; margin-bottom: .5rem; }
+  .tg-error { color: var(--red); font-size: .78rem; margin-top: .5rem; }
+
   #error-msg {
     display: none; margin-top: 1rem; padding: .875rem 1rem; border-radius: .875rem;
     background: rgba(248,113,113,0.08); border: 1px solid rgba(248,113,113,0.2);
@@ -340,8 +363,40 @@ function renderResults(data) {
       </div>
       <p class="conf-label ${confClass}">${p.confidence.toFixed(1)}% confidence</p>
       <div class="advice ${p.healthy ? 'healthy' : 'disease'}">${advice}</div>
+      ${!p.healthy ? `<button class="treatment-btn" data-condition="${encodeURIComponent(p.raw)}">🔬 Treatment Guide</button><div class="treatment-guide" style="display:none"></div>` : ''}
     `;
     results.appendChild(card);
+
+    if (!p.healthy) {
+      const btn = card.querySelector('.treatment-btn');
+      const guide = card.querySelector('.treatment-guide');
+      btn.addEventListener('click', async () => {
+        if (guide.style.display !== 'none') { guide.style.display = 'none'; btn.textContent = '🔬 Treatment Guide'; return; }
+        btn.disabled = true;
+        btn.textContent = 'Loading…';
+        try {
+          const resp = await fetch(`/disease-info/${btn.dataset.condition}`);
+          const info = await resp.json();
+          if (!resp.ok || info.error) throw new Error(info.error || 'Not found');
+          guide.innerHTML = `
+            <p class="pathogen"><strong>Pathogen:</strong> ${info.pathogen}</p>
+            <h4>Symptoms</h4><p>${info.symptoms}</p>
+            <h4>How it spreads</h4><p>${info.spread}</p>
+            <h4>Treatment</h4><ul>${info.treatment.map(t => `<li>${t}</li>`).join('')}</ul>
+            <h4>Prevention</h4><p>${info.prevention}</p>
+            <h4>Organic option</h4><p>${info.organic_option}</p>
+          `;
+          guide.style.display = 'block';
+          btn.textContent = '✕ Hide Guide';
+        } catch (err) {
+          guide.innerHTML = `<p class="tg-error">No treatment data found for this condition.</p>`;
+          guide.style.display = 'block';
+          btn.textContent = '✕ Hide Guide';
+        } finally {
+          btn.disabled = false;
+        }
+      });
+    }
   });
 
   if (demo) {
