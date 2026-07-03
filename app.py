@@ -572,10 +572,14 @@ def disease_info(name: str):
     following the 2026 MLOps pattern of agentic context enrichment where
     the inference API also serves the knowledge needed to act on its output.
     """
-    key = _normalize_disease_key(name)
-    if '___' in key:
-        parts = key.split('___')
-        key = parts[1] if len(parts) > 1 else key
+    # Extract the condition part from a raw PlantVillage label (e.g. "Tomato___Late_blight"
+    # → "Late_blight") before normalising. The check must run on the original string
+    # because _normalize_disease_key replaces underscores with spaces, which destroys "___".
+    raw_name = name.strip()
+    if '___' in raw_name:
+        parts = raw_name.split('___')
+        raw_name = parts[1] if len(parts) > 1 else raw_name
+    key = _normalize_disease_key(raw_name)
 
     if key in DISEASE_KB:
         info = DISEASE_KB[key]
