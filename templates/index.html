@@ -164,6 +164,20 @@
     border-top: 1px solid var(--border); margin-top: 3rem;
   }
   footer a { color: var(--green); text-decoration: none; }
+
+  /* Image quality card */
+  .iq-card {
+    background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px; padding: 14px 16px; margin-bottom: 12px;
+  }
+  .iq-header { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+  .iq-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  .iq-badge { font-size: 11px; font-weight: 600; padding: 2px 9px; border-radius: 20px; border: 1px solid; }
+  .iq-bar-wrap { height: 5px; background: rgba(255,255,255,0.06); border-radius: 9999px; overflow: hidden; margin-bottom: 8px; }
+  .iq-bar { height: 100%; border-radius: 9999px; transition: width 1s ease; }
+  .iq-flags { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+  .iq-flag { font-size: 11px; padding: 2px 8px; border-radius: 6px; background: rgba(251,191,36,0.12); color: #fbbf24; border: 1px solid rgba(251,191,36,0.2); }
+  .iq-tip { font-size: 11.5px; color: var(--muted); margin: 0; }
 </style>
 </head>
 <body>
@@ -337,6 +351,32 @@ analyzeBtn.addEventListener('click', async () => {
 function renderResults(data) {
   const { predictions, demo } = data;
   results.innerHTML = '';
+
+  // Image quality feedback — surface the backend's quality assessment so users
+  // know upfront if a low-quality photo is likely to reduce prediction accuracy.
+  const iq = data.image_quality;
+  if (iq && iq.quality_score != null) {
+    const scoreColor = iq.quality_level === 'good' ? '#4ade80' : iq.quality_level === 'fair' ? '#fbbf24' : '#f87171';
+    const flagsHtml = iq.quality_flags && iq.quality_flags.length
+      ? `<div class="iq-flags">${iq.quality_flags.map(f => `<span class="iq-flag">${f.replace(/_/g, ' ')}</span>`).join('')}</div>`
+      : '';
+    const qualityCard = document.createElement('div');
+    qualityCard.className = 'iq-card';
+    qualityCard.innerHTML = `
+      <div class="iq-header">
+        <span class="iq-label">Image Quality</span>
+        <span class="iq-badge" style="background:${scoreColor}22;color:${scoreColor};border-color:${scoreColor}55">${iq.quality_level} — ${iq.quality_score}/100</span>
+      </div>
+      <div class="iq-bar-wrap"><div class="iq-bar" style="width:0;background:${scoreColor}" data-width="${iq.quality_score}"></div></div>
+      ${flagsHtml}
+      ${iq.quality_level !== 'good' ? `<p class="iq-tip">Tip: use a clear, well-lit, in-focus photo for best results.</p>` : ''}
+    `;
+    results.appendChild(qualityCard);
+    requestAnimationFrame(() => {
+      const bar = qualityCard.querySelector('.iq-bar');
+      if (bar) bar.style.width = bar.dataset.width + '%';
+    });
+  }
 
   predictions.forEach((p, i) => {
     const isTop = i === 0;
