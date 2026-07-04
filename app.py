@@ -624,6 +624,93 @@ def stats():
     return jsonify(MONITOR.stats())
 
 
+@app.route('/confidence-history')
+def confidence_history():
+    """Time-series confidence trend endpoint for MLOps monitoring dashboards.
+
+    2026 MLOps best practice: expose a rolling confidence time series so
+    teams can plot prediction quality over time in Grafana, Retool, or any
+    dashboard tool — without a database. Returns the most recent `limit`
+    records (default 50, max 500) in ascending timestamp order so the caller
+    can feed them directly into a line chart.
+
+    Query params:
+      limit (int, 1-500): number of records to return (default 50)
+      include_demo (bool): whether to include demo-mode predictions (default false)
+
+    Response schema:
+      {
+        "count": 12,
+        "history": [
+          {
+            "timestamp": 1751234567.89,
+            "confidence": 87.4,
+            "confidence_level": "high",
+            "label": "Tomato___Late_blight",
+            "crop": "Tomato",
+            "healthy": false,
+            "demo": false
+          },
+          ...
+        ],
+        "trend": "improving" | "degrading" | "stable" | "insufficient_data",
+        "slope_per_10_samples": 1.23
+      }
+    """
+    try:
+        limit = min(500, max(1, int(request.args.get('limit', 50))))
+    except (TypeError, ValueError):
+        limit = 50
+    include_demo = request.args.get('include_demo', 'false').lower() in ('1', 'true', 'yes')
+
+    records = list(MONITOR.history)
+    if not include_demo:
+        records = [r for r in records if not r.get('demo')]
+    records = records[-limit:]
+
+    history = [
+        {
+            'timestamp': r['timestamp'],
+            'confidence': r['confidence'],
+            'confidence_level': r['confidence_level'],
+            'label': r['raw'],
+            'crop': r.get('crop'),
+            'healthy': r.get('healthy'),
+            'demo': r.get('demo', False),
+        }
+        for r in records
+    ]
+
+    # Compute linear trend slope over the window to surface "improving" vs "degrading".
+    # A simple least-squares slope over confidence values is enough for a dashboard
+    # alert — no scipy needed.
+    trend = 'insufficient_data'
+    slope = None
+    if len(history) >= 10:
+        n = len(history)
+        xs = list(range(n))
+        ys = [h['confidence'] for h in history]
+        x_mean = sum(xs) / n
+        y_mean = sum(ys) / n
+        numerator = sum((xs[i] - x_mean) * (ys[i] - y_mean) for i in range(n))
+        denominator = sum((xs[i] - x_mean) ** 2 for i in range(n))
+        raw_slope = numerator / denominator if denominator else 0.0
+        slope = round(raw_slope * 10, 4)  # normalise to per-10-samples
+        if slope > 1.0:
+            trend = 'improving'
+        elif slope < -1.0:
+            trend = 'degrading'
+        else:
+            trend = 'stable'
+
+    return jsonify({
+        'count': len(history),
+        'history': history,
+        'trend': trend,
+        'slope_per_10_samples': slope,
+    })
+
+
 
 class FeedbackStore:
     """Human-in-the-loop correction tracker for 2026 MLOps best practice.
