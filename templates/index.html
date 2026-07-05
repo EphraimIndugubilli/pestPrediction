@@ -403,11 +403,19 @@ function renderResults(data) {
       </div>
       <p class="conf-label ${confClass}">${p.confidence.toFixed(1)}% confidence</p>
       <div class="advice ${p.healthy ? 'healthy' : 'disease'}">${advice}</div>
-      ${!p.healthy ? `<button class="treatment-btn" data-condition="${encodeURIComponent(p.raw)}">🔬 Treatment Guide</button><div class="treatment-guide" style="display:none"></div>` : ''}
+      ${!p.healthy && p.treatment_advice ? `
+        <div class="treatment-guide" style="display:block;margin-top:.875rem">
+          <p class="pathogen"><strong>Pathogen:</strong> ${p.treatment_advice.pathogen}</p>
+          <h4>Immediate steps</h4><ul>${p.treatment_advice.first_steps.map(t => `<li>${t}</li>`).join('')}</ul>
+          <h4>Prevention</h4><p>${p.treatment_advice.prevention}</p>
+          <h4>Organic option</h4><p>${p.treatment_advice.organic_option}</p>
+        </div>
+      ` : ''}
+      ${!p.healthy && !p.treatment_advice ? `<button class="treatment-btn" data-condition="${encodeURIComponent(p.raw)}">🔬 Treatment Guide</button><div class="treatment-guide" style="display:none"></div>` : ''}
     `;
     results.appendChild(card);
 
-    if (!p.healthy) {
+    if (!p.healthy && !p.treatment_advice) {
       const btn = card.querySelector('.treatment-btn');
       const guide = card.querySelector('.treatment-guide');
       btn.addEventListener('click', async () => {

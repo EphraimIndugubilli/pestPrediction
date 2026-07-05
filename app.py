@@ -293,6 +293,7 @@ def predict():
              'confidence_level': confidence_level(round(p * 100, 2))}
             for i, p in zip(idxs, probs)
         ]
+        predictions[0]['treatment_advice'] = _lookup_treatment(LABELS[idxs[0]])
         MONITOR.record(predictions[0], demo=True)
         return jsonify({'predictions': predictions, 'demo': True, 'image_quality': quality})
 
@@ -305,6 +306,7 @@ def predict():
              'confidence_level': confidence_level(round(float(preds[i]) * 100, 2))}
             for i in top3
         ]
+        predictions[0]['treatment_advice'] = _lookup_treatment(LABELS[top3[0]])
         MONITOR.record(predictions[0], demo=False)
         return jsonify({'predictions': predictions, 'demo': False, 'image_quality': quality})
     except (IOError, OSError, ValueError) as e:
@@ -560,6 +562,40 @@ DISEASE_KB: dict = {
 
 def _normalize_disease_key(name: str) -> str:
     return name.lower().replace('_', ' ').replace('-', ' ').strip()
+
+
+def _lookup_treatment(raw_label: str) -> dict | None:
+    """Return a concise treatment summary from DISEASE_KB for a PlantVillage label.
+
+    Matches on the condition part of the label (after '___') using the same
+    normalisation as the /disease-info endpoint so results are consistent.
+    Returns None for healthy plants or unknown conditions.
+    """
+    if '___' in raw_label:
+        condition_part = raw_label.split('___')[1]
+    else:
+        condition_part = raw_label
+    if 'healthy' in condition_part.lower():
+        return None
+    key = _normalize_disease_key(condition_part)
+    if key in DISEASE_KB:
+        info = DISEASE_KB[key]
+        return {
+            'pathogen': info['pathogen'],
+            'first_steps': info['treatment'][:2],
+            'prevention': info['prevention'],
+            'organic_option': info['organic_option'],
+        }
+    # Partial match fallback
+    for db_key, info in DISEASE_KB.items():
+        if any(word in db_key for word in key.split() if len(word) > 4):
+            return {
+                'pathogen': info['pathogen'],
+                'first_steps': info['treatment'][:2],
+                'prevention': info['prevention'],
+                'organic_option': info['organic_option'],
+            }
+    return None
 
 
 @app.route('/disease-info/<path:name>')
