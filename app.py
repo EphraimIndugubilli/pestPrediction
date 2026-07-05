@@ -104,11 +104,45 @@ CONFIDENCE_THRESHOLDS = {
     'medium': 45.0,
 }
 
+# 2026 MLOps risk-aware inference: asymmetric confidence thresholds per disease.
+# Critical diseases use LOWER thresholds (higher sensitivity, fewer missed cases)
+# because the cost of a false negative far exceeds the cost of a false positive.
+# Healthy classifications use a HIGHER threshold (higher specificity) so we avoid
+# giving a false "all clear" when the model isn't truly confident.
+DISEASE_RISK_THRESHOLDS: dict[str, dict[str, float]] = {
+    # Critical — irreversible spread or no cure; bias toward early detection
+    'Late_blight':                    {'high': 50.0, 'medium': 28.0},
+    'Haunglongbing_(Citrus_greening)': {'high': 50.0, 'medium': 28.0},
+    'Tomato_Yellow_Leaf_Curl_Virus':   {'high': 50.0, 'medium': 28.0},
+    # High urgency — rapid spread; earlier treatment window matters
+    'Early_blight':                    {'high': 62.0, 'medium': 36.0},
+    'Black_rot':                       {'high': 62.0, 'medium': 36.0},
+    'Bacterial_spot':                  {'high': 62.0, 'medium': 36.0},
+    'Common_rust_':                    {'high': 62.0, 'medium': 36.0},
+    'Esca_(Black_Measles)':            {'high': 62.0, 'medium': 36.0},
+    'Tomato_mosaic_virus':             {'high': 62.0, 'medium': 36.0},
+}
 
-def confidence_level(score: float) -> str:
-    if score >= CONFIDENCE_THRESHOLDS['high']:
+HEALTHY_HIGH_THRESHOLD = 85.0  # require strong confidence before signalling healthy
+
+
+def confidence_level(score: float, raw_label: str = '') -> str:
+    """Return confidence tier, calibrated to disease risk.
+
+    Critical/high-urgency diseases use lower thresholds so the system errs on
+    the side of early detection (high sensitivity). Healthy classifications use
+    a raised threshold so we don't emit a false "all clear" (high specificity).
+    """
+    if 'healthy' in raw_label.lower():
+        if score >= HEALTHY_HIGH_THRESHOLD:
+            return 'high'
+        if score >= CONFIDENCE_THRESHOLDS['medium']:
+            return 'medium'
+        return 'low'
+    thresholds = DISEASE_RISK_THRESHOLDS.get(raw_label, CONFIDENCE_THRESHOLDS)
+    if score >= thresholds['high']:
         return 'high'
-    if score >= CONFIDENCE_THRESHOLDS['medium']:
+    if score >= thresholds['medium']:
         return 'medium'
     return 'low'
 
@@ -288,11 +322,11 @@ def predict():
         random.seed(len(image_bytes) % 100)
         idxs = random.sample(range(len(LABELS)), 3)
         probs = sorted([random.uniform(0.5, 0.99), random.uniform(0.01, 0.4), random.uniform(0.001, 0.1)], reverse=True)
-        predictions = [
-            {**format_label(LABELS[i]), 'confidence': round(p * 100, 2),
-             'confidence_level': confidence_level(round(p * 100, 2))}
-            for i, p in zip(idxs, probs)
-        ]
+        predictions = []
+        for i, p in zip(idxs, probs):
+            lbl = format_label(LABELS[i])
+            conf = round(p * 100, 2)
+            predictions.append({**lbl, 'confidence': conf, 'confidence_level': confidence_level(conf, lbl['raw'])})
         predictions[0]['treatment_advice'] = _lookup_treatment(LABELS[idxs[0]])
         MONITOR.record(predictions[0], demo=True)
         return jsonify({'predictions': predictions, 'demo': True, 'image_quality': quality})
@@ -301,11 +335,11 @@ def predict():
         arr = preprocess(image_bytes)
         preds = model.predict(arr, verbose=0)[0]
         top3 = np.argsort(preds)[::-1][:3]
-        predictions = [
-            {**format_label(LABELS[i]), 'confidence': round(float(preds[i]) * 100, 2),
-             'confidence_level': confidence_level(round(float(preds[i]) * 100, 2))}
-            for i in top3
-        ]
+        predictions = []
+        for i in top3:
+            lbl = format_label(LABELS[i])
+            conf = round(float(preds[i]) * 100, 2)
+            predictions.append({**lbl, 'confidence': conf, 'confidence_level': confidence_level(conf, lbl['raw'])})
         predictions[0]['treatment_advice'] = _lookup_treatment(LABELS[top3[0]])
         MONITOR.record(predictions[0], demo=False)
         return jsonify({'predictions': predictions, 'demo': False, 'image_quality': quality})
@@ -349,22 +383,22 @@ def batch_predict():
                 random.seed(len(image_bytes) % 100)
                 idxs = random.sample(range(len(LABELS)), 3)
                 probs = sorted([random.uniform(0.5, 0.99), random.uniform(0.01, 0.4), random.uniform(0.001, 0.1)], reverse=True)
-                predictions = [
-                    {**format_label(LABELS[i]), 'confidence': round(p * 100, 2),
-                     'confidence_level': confidence_level(round(p * 100, 2))}
-                    for i, p in zip(idxs, probs)
-                ]
+                predictions = []
+                for i, p in zip(idxs, probs):
+                    lbl = format_label(LABELS[i])
+                    conf = round(p * 100, 2)
+                    predictions.append({**lbl, 'confidence': conf, 'confidence_level': confidence_level(conf, lbl['raw'])})
                 MONITOR.record(predictions[0], demo=True)
                 results.append({'filename': file.filename, 'predictions': predictions, 'demo': True})
             else:
                 arr = preprocess(image_bytes)
                 preds = model.predict(arr, verbose=0)[0]
                 top3 = np.argsort(preds)[::-1][:3]
-                predictions = [
-                    {**format_label(LABELS[i]), 'confidence': round(float(preds[i]) * 100, 2),
-                     'confidence_level': confidence_level(round(float(preds[i]) * 100, 2))}
-                    for i in top3
-                ]
+                predictions = []
+                for i in top3:
+                    lbl = format_label(LABELS[i])
+                    conf = round(float(preds[i]) * 100, 2)
+                    predictions.append({**lbl, 'confidence': conf, 'confidence_level': confidence_level(conf, lbl['raw'])})
                 MONITOR.record(predictions[0], demo=False)
                 results.append({'filename': file.filename, 'predictions': predictions, 'demo': False})
         except (IOError, OSError, ValueError) as e:
@@ -596,8 +630,6 @@ def _lookup_treatment(raw_label: str) -> dict | None:
                 'organic_option': info['organic_option'],
             }
     return None
-
-
 @app.route('/disease-info/<path:name>')
 def disease_info(name: str):
     """Return structured treatment and pathology data for a named disease.
