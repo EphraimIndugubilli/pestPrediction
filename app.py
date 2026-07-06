@@ -875,6 +875,148 @@ def feedback_stats():
     return jsonify(FEEDBACK.stats())
 
 
+# Seasonal disease risk calendar — 2026 MLOps trend: enriching inference APIs
+# with agronomic context so practitioners know WHEN to watch for each disease,
+# not just WHAT to look for. Each entry maps month ranges to disease risk levels
+# driven by the environmental conditions (temperature, humidity, rainfall) that
+# favour spore germination and spread.
+SEASONAL_RISK: dict[str, list[dict]] = {
+    "tomato": [
+        {"disease": "Late blight",       "peak_months": [6, 7, 8, 9],   "risk": "critical", "trigger": "Cool (10–25°C), wet"},
+        {"disease": "Early blight",      "peak_months": [7, 8, 9, 10],  "risk": "high",     "trigger": "Warm, humid, older leaves"},
+        {"disease": "Septoria leaf spot","peak_months": [6, 7, 8],      "risk": "medium",   "trigger": "Wet, splashing rain"},
+        {"disease": "Bacterial spot",    "peak_months": [5, 6, 7, 8],   "risk": "high",     "trigger": "Warm (>24°C), wet"},
+        {"disease": "TYLCV (virus)",     "peak_months": [4, 5, 6, 7, 8],"risk": "critical", "trigger": "Whitefly peak activity"},
+        {"disease": "Leaf Mold",         "peak_months": [3, 4, 5, 10, 11],"risk": "medium", "trigger": "High humidity >85%, greenhouse"},
+    ],
+    "potato": [
+        {"disease": "Late blight",       "peak_months": [6, 7, 8, 9],   "risk": "critical", "trigger": "Cool, wet, foggy"},
+        {"disease": "Early blight",      "peak_months": [7, 8, 9],      "risk": "high",     "trigger": "Warm, dry spells after rain"},
+    ],
+    "apple": [
+        {"disease": "Apple scab",        "peak_months": [3, 4, 5, 6],   "risk": "high",     "trigger": "Wet spring, ascospore release"},
+        {"disease": "Cedar apple rust",  "peak_months": [4, 5, 6],      "risk": "medium",   "trigger": "Wet spring, nearby junipers"},
+        {"disease": "Black rot",         "peak_months": [5, 6, 7, 8],   "risk": "high",     "trigger": "Warm, wet, from mummified fruit"},
+    ],
+    "corn": [
+        {"disease": "Northern leaf blight","peak_months": [6, 7, 8],    "risk": "medium",   "trigger": "Moderate temp, high humidity"},
+        {"disease": "Common rust",        "peak_months": [6, 7, 8, 9],  "risk": "high",     "trigger": "Cool (16–23°C), humid"},
+        {"disease": "Grey leaf spot",     "peak_months": [7, 8, 9],     "risk": "medium",   "trigger": "Warm, humid, minimal tillage"},
+    ],
+    "grape": [
+        {"disease": "Black rot",          "peak_months": [5, 6, 7],     "risk": "high",     "trigger": "Warm, wet spring"},
+        {"disease": "Powdery mildew",     "peak_months": [5, 6, 7, 8],  "risk": "medium",   "trigger": "Warm days, cool nights"},
+        {"disease": "Downy mildew",       "peak_months": [4, 5, 6, 7],  "risk": "high",     "trigger": "Cool, wet (>10mm rain)"},
+    ],
+    "strawberry": [
+        {"disease": "Leaf scorch",        "peak_months": [5, 6, 7, 8],  "risk": "medium",   "trigger": "Warm, wet"},
+        {"disease": "Botrytis (grey mold)","peak_months": [3, 4, 5, 10, 11],"risk": "high", "trigger": "Cool, wet, high humidity"},
+    ],
+    "pepper": [
+        {"disease": "Bacterial spot",     "peak_months": [5, 6, 7, 8],  "risk": "high",     "trigger": "Warm (>24°C), wet"},
+        {"disease": "Phytophthora blight","peak_months": [6, 7, 8, 9],  "risk": "critical", "trigger": "Saturated soil, warm"},
+    ],
+    "peach": [
+        {"disease": "Bacterial spot",     "peak_months": [4, 5, 6, 7],  "risk": "high",     "trigger": "Wet, wind-driven rain"},
+        {"disease": "Brown rot",          "peak_months": [7, 8, 9],     "risk": "high",     "trigger": "Warm, humid near harvest"},
+    ],
+    "orange": [
+        {"disease": "Citrus greening (HLB)","peak_months": list(range(1,13)),"risk": "critical","trigger": "Year-round — psyllid vector"},
+        {"disease": "Citrus canker",      "peak_months": [5, 6, 7, 8, 9],"risk": "high",    "trigger": "Warm, wet, wind"},
+    ],
+}
+
+MONTH_NAMES = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+               "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+
+@app.route('/seasonal-risk', methods=['GET'])
+def seasonal_risk():
+    """Return disease risk calendar for a given crop and optional month.
+
+    2026 agronomic AI trend: proactive risk alerts based on time of year so
+    farmers can apply preventive treatments before symptoms appear, not after.
+    The endpoint enriches the prediction API with seasonal context — the same
+    pattern emerging across agri-AI platforms in 2026.
+
+    Query params:
+      crop (str): crop name — tomato, potato, apple, corn, grape, strawberry,
+                  pepper, peach, orange (case-insensitive, partial match OK)
+      month (int, 1-12): target month; if omitted, returns the full year calendar
+
+    Response:
+      {
+        "crop": "tomato",
+        "month": 7,
+        "month_name": "Jul",
+        "risks": [
+          { "disease": "Late blight", "risk": "critical", "trigger": "Cool (10-25°C), wet",
+            "active_this_month": true, "peak_months": [6,7,8,9] },
+          ...
+        ],
+        "active_count": 3,
+        "highest_risk": "critical"
+      }
+    """
+    raw_crop = request.args.get('crop', '').strip().lower()
+    if not raw_crop:
+        available = sorted(SEASONAL_RISK.keys())
+        return jsonify({
+            'error': 'crop parameter required',
+            'available_crops': available,
+        }), 400
+
+    # Partial-match lookup
+    matched_key = None
+    for key in SEASONAL_RISK:
+        if raw_crop in key or key in raw_crop:
+            matched_key = key
+            break
+
+    if not matched_key:
+        return jsonify({
+            'error': f'No seasonal data for "{raw_crop}".',
+            'available_crops': sorted(SEASONAL_RISK.keys()),
+        }), 404
+
+    try:
+        month = int(request.args.get('month', 0))
+        if not (0 <= month <= 12):
+            month = 0
+    except (TypeError, ValueError):
+        month = 0
+
+    calendar = SEASONAL_RISK[matched_key]
+    risks = []
+    for entry in calendar:
+        active = month in entry['peak_months'] if month else True
+        risks.append({
+            'disease':          entry['disease'],
+            'risk':             entry['risk'],
+            'trigger':          entry['trigger'],
+            'peak_months':      entry['peak_months'],
+            'peak_month_names': [MONTH_NAMES[m] for m in entry['peak_months']],
+            'active_this_month': active,
+        })
+
+    if month:
+        risks.sort(key=lambda r: (not r['active_this_month'],
+                                  {'critical': 0, 'high': 1, 'medium': 2, 'low': 3}.get(r['risk'], 4)))
+    active_risks = [r for r in risks if r['active_this_month']]
+    risk_order = {'critical': 0, 'high': 1, 'medium': 2, 'low': 3}
+    highest = min(active_risks, key=lambda r: risk_order.get(r['risk'], 4))['risk'] if active_risks else 'none'
+
+    return jsonify({
+        'crop':          matched_key,
+        'month':         month or None,
+        'month_name':    MONTH_NAMES[month] if month else None,
+        'risks':         risks,
+        'active_count':  len(active_risks),
+        'highest_risk':  highest,
+        'note':          'Risk levels are agronomic guidelines based on environmental conditions typical for each month. Actual risk depends on local weather, variety resistance, and field history.',
+    })
+
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(debug=os.environ.get('FLASK_DEBUG', '0') == '1', host='0.0.0.0', port=port)
