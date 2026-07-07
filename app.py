@@ -296,6 +296,36 @@ def format_label(raw: str) -> dict:
     return {'crop': crop, 'condition': condition, 'healthy': healthy, 'raw': raw, 'urgency': urgency}
 
 
+def _seasonal_context_for_prediction(top_prediction: dict) -> dict | None:
+    """Auto-inject seasonal disease risk context for the detected crop.
+
+    2026 agri-AI trend: enrich inference with proactive seasonal alerts so
+    farmers know what to watch for given the time of year, not just what
+    was detected. Uses the current month and detected crop to surface the
+    most relevant risk from SEASONAL_RISK calendar.
+    """
+    import datetime
+    crop = (top_prediction.get('crop') or '').strip().lower()
+    if not crop or top_prediction.get('healthy'):
+        return None
+    month = datetime.datetime.now().month
+    matched_key = next((k for k in SEASONAL_RISK if crop in k or k in crop), None)
+    if not matched_key:
+        return None
+    risks = SEASONAL_RISK[matched_key]
+    active = [r for r in risks if month in r['peak_months']]
+    if not active:
+        return None
+    active.sort(key=lambda r: {'critical': 0, 'high': 1, 'medium': 2, 'low': 3}.get(r['risk'], 4))
+    return {
+        'crop': matched_key,
+        'month': month,
+        'active_diseases': active,
+        'highest_risk': active[0]['risk'],
+        'note': f'Active disease risks for {matched_key} in month {month} based on seasonal calendar.',
+    }
+
+
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -329,7 +359,8 @@ def predict():
             predictions.append({**lbl, 'confidence': conf, 'confidence_level': confidence_level(conf, lbl['raw'])})
         predictions[0]['treatment_advice'] = _lookup_treatment(LABELS[idxs[0]])
         MONITOR.record(predictions[0], demo=True)
-        return jsonify({'predictions': predictions, 'demo': True, 'image_quality': quality})
+        seasonal = _seasonal_context_for_prediction(predictions[0])
+        return jsonify({'predictions': predictions, 'demo': True, 'image_quality': quality, 'seasonal_context': seasonal})
 
     try:
         arr = preprocess(image_bytes)
@@ -342,7 +373,8 @@ def predict():
             predictions.append({**lbl, 'confidence': conf, 'confidence_level': confidence_level(conf, lbl['raw'])})
         predictions[0]['treatment_advice'] = _lookup_treatment(LABELS[top3[0]])
         MONITOR.record(predictions[0], demo=False)
-        return jsonify({'predictions': predictions, 'demo': False, 'image_quality': quality})
+        seasonal = _seasonal_context_for_prediction(predictions[0])
+        return jsonify({'predictions': predictions, 'demo': False, 'image_quality': quality, 'seasonal_context': seasonal})
     except (IOError, OSError, ValueError) as e:
         return jsonify({'error': f'Could not process image: {e}'}), 400
     except Exception as e:
