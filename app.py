@@ -69,12 +69,19 @@ def load_model():
     return MODEL
 
 
-def preprocess(image_bytes: bytes) -> np.ndarray:
+def preprocess(image_bytes: bytes) -> tuple:
     from PIL import Image
     img = Image.open(io.BytesIO(image_bytes)).convert('RGB')
+    orig_w, orig_h = img.size
     img = img.resize((IMG_SIZE, IMG_SIZE))
     arr = np.array(img, dtype=np.float32) / 255.0
-    return np.expand_dims(arr, 0)
+    info = {
+        'original_size': f'{orig_w}×{orig_h}',
+        'model_input_size': f'{IMG_SIZE}×{IMG_SIZE}',
+        'file_size_kb': round(len(image_bytes) / 1024, 1),
+        'normalized': True,
+    }
+    return np.expand_dims(arr, 0), info
 
 
 TREATMENT_URGENCY = {
@@ -363,7 +370,7 @@ def predict():
         return jsonify({'predictions': predictions, 'demo': True, 'image_quality': quality, 'seasonal_context': seasonal})
 
     try:
-        arr = preprocess(image_bytes)
+        arr, preprocess_info = preprocess(image_bytes)
         preds = model.predict(arr, verbose=0)[0]
         top3 = np.argsort(preds)[::-1][:3]
         predictions = []
@@ -374,7 +381,7 @@ def predict():
         predictions[0]['treatment_advice'] = _lookup_treatment(LABELS[top3[0]])
         MONITOR.record(predictions[0], demo=False)
         seasonal = _seasonal_context_for_prediction(predictions[0])
-        return jsonify({'predictions': predictions, 'demo': False, 'image_quality': quality, 'seasonal_context': seasonal})
+        return jsonify({'predictions': predictions, 'demo': False, 'image_quality': quality, 'seasonal_context': seasonal, 'preprocess_info': preprocess_info})
     except (IOError, OSError, ValueError) as e:
         return jsonify({'error': f'Could not process image: {e}'}), 400
     except Exception as e:
@@ -423,7 +430,7 @@ def batch_predict():
                 MONITOR.record(predictions[0], demo=True)
                 results.append({'filename': file.filename, 'predictions': predictions, 'demo': True})
             else:
-                arr = preprocess(image_bytes)
+                arr, _ = preprocess(image_bytes)
                 preds = model.predict(arr, verbose=0)[0]
                 top3 = np.argsort(preds)[::-1][:3]
                 predictions = []
