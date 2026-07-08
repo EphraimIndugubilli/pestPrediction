@@ -417,6 +417,7 @@ def batch_predict():
             if not image_bytes:
                 results.append({'filename': file.filename, 'error': 'Uploaded file is empty.'})
                 continue
+            quality = assess_image_quality(image_bytes)
             if model is None:
                 import random
                 random.seed(len(image_bytes) % 100)
@@ -428,7 +429,7 @@ def batch_predict():
                     conf = round(p * 100, 2)
                     predictions.append({**lbl, 'confidence': conf, 'confidence_level': confidence_level(conf, lbl['raw'])})
                 MONITOR.record(predictions[0], demo=True)
-                results.append({'filename': file.filename, 'predictions': predictions, 'demo': True})
+                results.append({'filename': file.filename, 'predictions': predictions, 'demo': True, 'image_quality': quality})
             else:
                 arr, _ = preprocess(image_bytes)
                 preds = model.predict(arr, verbose=0)[0]
@@ -439,7 +440,7 @@ def batch_predict():
                     conf = round(float(preds[i]) * 100, 2)
                     predictions.append({**lbl, 'confidence': conf, 'confidence_level': confidence_level(conf, lbl['raw'])})
                 MONITOR.record(predictions[0], demo=False)
-                results.append({'filename': file.filename, 'predictions': predictions, 'demo': False})
+                results.append({'filename': file.filename, 'predictions': predictions, 'demo': False, 'image_quality': quality})
         except (IOError, OSError, ValueError) as e:
             results.append({'filename': file.filename, 'error': f'Could not process image: {e}'})
         except Exception:
