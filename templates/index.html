@@ -187,6 +187,26 @@
   .fb-btn-no  { border-color: rgba(248,113,113,.3); background: rgba(248,113,113,.06); color: var(--red); }
   .fb-btn-no:hover  { background: rgba(248,113,113,.12); }
   .fb-sent { font-size: .75rem; color: var(--muted); font-style: italic; }
+  /* Seasonal risk alert — 2026 agri-AI trend: proactive seasonal disease alerts */
+  .seasonal-alert {
+    background: rgba(251,191,36,0.06); border: 1px solid rgba(251,191,36,0.2);
+    border-radius: 12px; padding: 14px 16px; margin-bottom: 12px;
+  }
+  .seasonal-alert.critical { background: rgba(248,113,113,0.07); border-color: rgba(248,113,113,0.22); }
+  .seasonal-alert.high     { background: rgba(251,113,75,0.07);  border-color: rgba(251,113,75,0.22); }
+  .seasonal-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .seasonal-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  .seasonal-badge { font-size: 11px; font-weight: 600; padding: 2px 9px; border-radius: 20px; border: 1px solid; }
+  .seasonal-disease { display: flex; align-items: flex-start; gap: 8px; margin-top: 6px; font-size: 12.5px; }
+  .seasonal-risk-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 4px; flex-shrink: 0; }
+  .seasonal-tip { font-size: 11.5px; color: var(--muted); margin-top: 7px; line-height: 1.4; }
+
+  /* Confidence margin bar */
+  .conf-margin { margin-top: 8px; display: flex; align-items: center; gap: 8px; }
+  .conf-margin-label { font-size: 10.5px; color: var(--muted); flex-shrink: 0; }
+  .conf-margin-track { flex: 1; height: 3px; background: rgba(255,255,255,0.07); border-radius: 9999px; overflow: hidden; }
+  .conf-margin-fill  { height: 100%; border-radius: 9999px; transition: width 0.9s ease; }
+  .conf-margin-value { font-size: 10.5px; font-weight: 600; flex-shrink: 0; }
 </style>
 </head>
 <body>
@@ -496,6 +516,57 @@ function renderResults(data) {
       });
     }
   });
+
+  // Confidence margin — gap between top-1 and top-2 signals how decisive the model is.
+  // Narrow gap means the two conditions look similar; wide gap means clear diagnosis.
+  if (predictions.length >= 2) {
+    const margin = predictions[0].confidence - predictions[1].confidence;
+    const marginColor = margin >= 40 ? '#4ade80' : margin >= 15 ? '#fbbf24' : '#f87171';
+    const marginLabel = margin >= 40 ? 'Clear diagnosis' : margin >= 15 ? 'Moderate certainty' : 'Borderline — review top alternatives';
+    const marginCard = document.createElement('div');
+    marginCard.style.cssText = 'background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:12px;padding:12px 16px;margin-bottom:12px;';
+    marginCard.innerHTML = `
+      <div style="font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:7px;">Diagnosis confidence margin</div>
+      <div class="conf-margin">
+        <span class="conf-margin-label">vs #2</span>
+        <div class="conf-margin-track"><div class="conf-margin-fill" style="width:0;background:${marginColor}" data-width="${Math.min(100, margin)}"></div></div>
+        <span class="conf-margin-value" style="color:${marginColor}">${margin.toFixed(1)}%</span>
+      </div>
+      <div style="font-size:11.5px;color:${marginColor};margin-top:5px;font-weight:600;">${marginLabel}</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:3px;">Gap between top prediction (${predictions[0].confidence.toFixed(1)}%) and runner-up (${predictions[1].confidence.toFixed(1)}%). A margin above 40% signals a confident, clear-cut diagnosis.</div>
+    `;
+    results.appendChild(marginCard);
+    requestAnimationFrame(() => {
+      const fill = marginCard.querySelector('.conf-margin-fill');
+      if (fill) fill.style.width = fill.dataset.width + '%';
+    });
+  }
+
+  // Seasonal risk alert — surface active disease risks for the detected crop this month.
+  const sc = data.seasonal_context;
+  if (sc && sc.active_diseases && sc.active_diseases.length) {
+    const riskColors = { critical: '#f87171', high: '#fb7143', medium: '#fbbf24', low: '#4ade80' };
+    const topRisk = sc.highest_risk || 'low';
+    const riskColor = riskColors[topRisk] || '#fbbf24';
+    const alertEl = document.createElement('div');
+    alertEl.className = `seasonal-alert ${topRisk === 'critical' ? 'critical' : topRisk === 'high' ? 'high' : ''}`;
+    const diseasesHtml = sc.active_diseases.slice(0, 3).map(d => {
+      const dc = riskColors[d.risk] || '#fbbf24';
+      return `<div class="seasonal-disease">
+        <div class="seasonal-risk-dot" style="background:${dc}"></div>
+        <div><strong style="color:${dc}">${d.disease}</strong> — ${d.risk} risk this month${d.symptoms ? ` · ${d.symptoms}` : ''}</div>
+      </div>`;
+    }).join('');
+    alertEl.innerHTML = `
+      <div class="seasonal-header">
+        <span class="seasonal-label">Seasonal Risk Alert</span>
+        <span class="seasonal-badge" style="background:${riskColor}18;color:${riskColor};border-color:${riskColor}44">${sc.crop} · ${topRisk} season risk</span>
+      </div>
+      ${diseasesHtml}
+      <p class="seasonal-tip">These diseases are historically active for ${sc.crop} in the current month. Watch for early symptoms and consider preventive measures even if not yet detected.</p>
+    `;
+    results.appendChild(alertEl);
+  }
 
   if (demo) {
     const note = document.createElement('p');
