@@ -7,6 +7,7 @@ import os
 import io
 import json
 import time
+import hashlib
 from collections import deque, Counter
 import numpy as np
 from flask import Flask, request, jsonify, render_template, send_from_directory
@@ -219,6 +220,49 @@ class PredictionMonitor:
 MONITOR = PredictionMonitor()
 
 
+class PredictionCache:
+    """MD5-keyed LRU prediction cache — 2026 MLOps standard for inference serving.
+
+    Identical image bytes always produce the same model output, so re-running
+    inference on a duplicate upload wastes GPU/CPU time and adds latency.
+    Caching by content hash (MD5 of raw bytes) avoids repeated computation
+    while staying stateless — no database, no external dependency.
+
+    LRU eviction: the oldest entry is dropped once the cache fills, keeping
+    memory bounded without touching recent results.
+    """
+
+    def __init__(self, max_size: int = 200):
+        self.max_size = max_size
+        self._store: dict[str, dict] = {}
+
+    def _key(self, image_bytes: bytes) -> str:
+        return hashlib.md5(image_bytes, usedforsecurity=False).hexdigest()
+
+    def get(self, image_bytes: bytes) -> dict | None:
+        key = self._key(image_bytes)
+        if key in self._store:
+            # Refresh position: move to end (most recently used)
+            entry = self._store.pop(key)
+            self._store[key] = entry
+            return entry
+        return None
+
+    def set(self, image_bytes: bytes, result: dict) -> None:
+        key = self._key(image_bytes)
+        if key in self._store:
+            self._store.pop(key)
+        elif len(self._store) >= self.max_size:
+            self._store.pop(next(iter(self._store)))
+        self._store[key] = result
+
+    def stats(self) -> dict:
+        return {'size': len(self._store), 'max_size': self.max_size}
+
+
+PRED_CACHE = PredictionCache(max_size=200)
+
+
 def assess_image_quality(image_bytes: bytes) -> dict:
     """Score an uploaded image for prediction-readiness before inference.
 
@@ -350,6 +394,11 @@ def predict():
     if not image_bytes:
         return jsonify({'error': 'Uploaded file is empty.'}), 400
 
+    # 2026 MLOps caching: identical image → identical output, skip inference
+    cached = PRED_CACHE.get(image_bytes)
+    if cached is not None:
+        return jsonify({**cached, 'from_cache': True})
+
     quality = assess_image_quality(image_bytes)
     model = load_model()
 
@@ -381,7 +430,9 @@ def predict():
         predictions[0]['treatment_advice'] = _lookup_treatment(LABELS[top3[0]])
         MONITOR.record(predictions[0], demo=False)
         seasonal = _seasonal_context_for_prediction(predictions[0])
-        return jsonify({'predictions': predictions, 'demo': False, 'image_quality': quality, 'seasonal_context': seasonal, 'preprocess_info': preprocess_info})
+        result = {'predictions': predictions, 'demo': False, 'image_quality': quality, 'seasonal_context': seasonal, 'preprocess_info': preprocess_info}
+        PRED_CACHE.set(image_bytes, result)
+        return jsonify(result)
     except (IOError, OSError, ValueError) as e:
         return jsonify({'error': f'Could not process image: {e}'}), 400
     except Exception as e:
@@ -729,7 +780,7 @@ def stats():
     an MLOps governance setup checks to catch a model silently degrading in
     production before it becomes a support ticket.
     """
-    return jsonify(MONITOR.stats())
+    return jsonify({**MONITOR.stats(), 'prediction_cache': PRED_CACHE.stats()})
 
 
 @app.route('/confidence-history')
