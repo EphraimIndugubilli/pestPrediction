@@ -225,7 +225,15 @@
     <p>Upload a photo of a leaf and get AI-powered diagnosis with treatment recommendations.</p>
   </div>
 
-  <!-- Upload -->
+  <!-- Mode toggle -->
+  <div style="display:flex;align-items:center;justify-content:center;gap:.5rem;margin-bottom:1.25rem;">
+    <button id="btn-single" onclick="setMode('single')"
+      style="padding:.4rem 1.1rem;border-radius:2rem;border:1px solid var(--green);font-size:.8rem;font-weight:600;cursor:pointer;background:var(--green2);color:#fff;transition:all .15s;">Single image</button>
+    <button id="btn-batch" onclick="setMode('batch')"
+      style="padding:.4rem 1.1rem;border-radius:2rem;border:1px solid rgba(74,222,128,0.3);font-size:.8rem;font-weight:600;cursor:pointer;background:transparent;color:var(--muted);transition:all .15s;">Batch (up to 10)</button>
+  </div>
+
+  <!-- Single mode upload -->
   <div id="drop-zone" role="button" tabindex="0" aria-label="Upload plant image">
     <div class="icon">🍃</div>
     <p><strong>Drag &amp; drop</strong> a leaf photo here</p>
@@ -253,6 +261,33 @@
 
   <div id="error-msg"></div>
   <div id="results"></div>
+
+  <!-- Batch mode section (hidden by default) -->
+  <div id="batch-section" style="display:none;">
+    <div id="batch-drop-zone"
+      style="border:2px dashed rgba(74,222,128,0.2);border-radius:1.25rem;padding:2rem 1.5rem;text-align:center;cursor:pointer;background:var(--surface);transition:border-color .2s,background .2s;"
+      role="button" tabindex="0" aria-label="Upload multiple plant images">
+      <div style="font-size:2.5rem;margin-bottom:.6rem;">🍃🍃</div>
+      <p style="color:var(--muted);font-size:.875rem;"><strong style="color:var(--green)">Click to choose</strong> up to 10 images at once</p>
+      <p style="color:var(--muted);font-size:.75rem;margin-top:.35rem;">PNG, JPG, WEBP · max 10 MB each</p>
+      <input type="file" id="batch-file-input" accept="image/*" multiple style="display:none;" />
+    </div>
+
+    <div id="batch-preview-list" style="display:none;margin-top:1rem;display:flex;flex-wrap:wrap;gap:.6rem;"></div>
+
+    <button id="batch-analyze-btn" style="display:none;width:100%;margin-top:1rem;padding:.875rem;border-radius:.875rem;border:none;cursor:pointer;font-size:1rem;font-weight:700;color:#fff;background:linear-gradient(135deg,var(--green2),#15803d);transition:opacity .15s;">
+      Analyze all images 🔍
+    </button>
+
+    <div id="batch-loading" style="display:none;text-align:center;padding:1.5rem;">
+      <div class="spinner"></div>
+      <p style="color:var(--muted);font-size:.875rem;margin-top:.5rem;">Analyzing batch…</p>
+    </div>
+
+    <div id="batch-error" style="display:none;margin-top:1rem;padding:.875rem 1rem;border-radius:.875rem;background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.2);color:var(--red);font-size:.875rem;text-align:center;"></div>
+
+    <div id="batch-results" style="display:none;margin-top:1.25rem;"></div>
+  </div>
 </main>
 
 <footer>
@@ -272,6 +307,149 @@ const errorMsg = document.getElementById('error-msg');
 const changeImg = document.getElementById('change-img');
 
 let selectedFile = null;
+
+// ── Mode toggle (single / batch) ──────────────────────────────────
+const singleEls = [dropZone, previewWrap, analyzeBtn, loading, results, errorMsg];
+const batchSection = document.getElementById('batch-section');
+const btnSingle = document.getElementById('btn-single');
+const btnBatch = document.getElementById('btn-batch');
+
+function setMode(mode) {
+  const isBatch = mode === 'batch';
+  singleEls.forEach(el => { if (el) el.style.display = isBatch ? 'none' : ''; });
+  if (dropZone) dropZone.style.display = isBatch ? 'none' : '';
+  batchSection.style.display = isBatch ? 'block' : 'none';
+  btnSingle.style.background = isBatch ? 'transparent' : 'var(--green2)';
+  btnSingle.style.color      = isBatch ? 'var(--muted)' : '#fff';
+  btnSingle.style.borderColor = isBatch ? 'rgba(74,222,128,0.3)' : 'var(--green)';
+  btnBatch.style.background  = isBatch ? 'var(--green2)' : 'transparent';
+  btnBatch.style.color       = isBatch ? '#fff' : 'var(--muted)';
+  btnBatch.style.borderColor = isBatch ? 'var(--green)' : 'rgba(74,222,128,0.3)';
+}
+
+// ── Batch mode logic ──────────────────────────────────────────────
+const batchDropZone   = document.getElementById('batch-drop-zone');
+const batchFileInput  = document.getElementById('batch-file-input');
+const batchPreviewList = document.getElementById('batch-preview-list');
+const batchAnalyzeBtn = document.getElementById('batch-analyze-btn');
+const batchLoading    = document.getElementById('batch-loading');
+const batchError      = document.getElementById('batch-error');
+const batchResultsEl  = document.getElementById('batch-results');
+
+let batchFiles = [];
+
+batchDropZone.addEventListener('click', () => batchFileInput.click());
+batchDropZone.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') batchFileInput.click(); });
+batchDropZone.addEventListener('dragover', e => { e.preventDefault(); batchDropZone.style.borderColor = 'var(--green)'; });
+batchDropZone.addEventListener('dragleave', () => { batchDropZone.style.borderColor = 'rgba(74,222,128,0.2)'; });
+batchDropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  batchDropZone.style.borderColor = 'rgba(74,222,128,0.2)';
+  addBatchFiles(Array.from(e.dataTransfer.files));
+});
+batchFileInput.addEventListener('change', () => {
+  addBatchFiles(Array.from(batchFileInput.files));
+  batchFileInput.value = '';
+});
+
+function addBatchFiles(files) {
+  const valid = files.filter(f => f.type.startsWith('image/') && f.size <= 10 * 1024 * 1024);
+  const merged = [...batchFiles, ...valid].slice(0, 10);
+  batchFiles = merged;
+  renderBatchPreviews();
+}
+
+function renderBatchPreviews() {
+  batchPreviewList.innerHTML = '';
+  if (!batchFiles.length) {
+    batchPreviewList.style.display = 'none';
+    batchAnalyzeBtn.style.display = 'none';
+    return;
+  }
+  batchPreviewList.style.display = 'flex';
+  batchAnalyzeBtn.style.display = 'block';
+  batchFiles.forEach((file, idx) => {
+    const url = URL.createObjectURL(file);
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'position:relative;flex-shrink:0;';
+    wrap.innerHTML = `
+      <img src="${url}" alt="${file.name}" style="width:72px;height:72px;object-fit:cover;border-radius:.6rem;border:1px solid rgba(74,222,128,0.2);" />
+      <button onclick="removeBatchFile(${idx})" style="position:absolute;top:-5px;right:-5px;width:18px;height:18px;border-radius:50%;border:none;background:var(--red);color:#fff;font-size:10px;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1;">✕</button>
+      <div style="font-size:9px;color:var(--muted);margin-top:3px;max-width:72px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${file.name}</div>`;
+    batchPreviewList.appendChild(wrap);
+  });
+  const count = document.createElement('div');
+  count.style.cssText = 'font-size:.75rem;color:var(--muted);align-self:center;flex-shrink:0;';
+  count.textContent = `${batchFiles.length}/10 selected`;
+  batchPreviewList.appendChild(count);
+}
+
+function removeBatchFile(idx) {
+  batchFiles.splice(idx, 1);
+  renderBatchPreviews();
+}
+
+batchAnalyzeBtn.addEventListener('click', async () => {
+  if (!batchFiles.length) return;
+  batchAnalyzeBtn.disabled = true;
+  batchLoading.style.display = 'block';
+  batchResultsEl.style.display = 'none';
+  batchError.style.display = 'none';
+
+  const fd = new FormData();
+  batchFiles.forEach(f => fd.append('images', f));
+
+  try {
+    const res = await fetch('/batch', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || 'Batch prediction failed.');
+    renderBatchResults(data);
+  } catch (err) {
+    batchError.textContent = err.message || 'Could not reach the server. Check your connection.';
+    batchError.style.display = 'block';
+  } finally {
+    batchLoading.style.display = 'none';
+    batchAnalyzeBtn.disabled = false;
+  }
+});
+
+function renderBatchResults(data) {
+  batchResultsEl.innerHTML = '';
+  const { results: items } = data;
+  const header = document.createElement('div');
+  header.style.cssText = 'font-size:.8rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:.75rem;';
+  header.textContent = `Batch results — ${items.length} image${items.length !== 1 ? 's' : ''}`;
+  batchResultsEl.appendChild(header);
+
+  items.forEach(item => {
+    const card = document.createElement('div');
+    card.className = 'result-card';
+    card.style.marginBottom = '.75rem';
+
+    if (item.error) {
+      card.innerHTML = `
+        <p style="font-size:.75rem;color:var(--muted);margin-bottom:.35rem;">${item.filename}</p>
+        <p style="color:var(--red);font-size:.875rem;">⚠ ${item.error}</p>`;
+    } else {
+      const top = item.predictions[0];
+      const barColor = top.confidence >= 70 ? '#4ade80' : top.confidence >= 40 ? '#fbbf24' : '#f87171';
+      const confClass = top.confidence >= 70 ? 'high' : top.confidence >= 40 ? 'med' : 'low';
+      card.innerHTML = `
+        <p style="font-size:.75rem;color:var(--muted);margin-bottom:.35rem;">${item.filename}${item.demo ? ' · <em>demo mode</em>' : ''}</p>
+        <span class="badge ${top.healthy ? 'healthy' : 'disease'}">${top.healthy ? 'Healthy' : 'Disease detected'}</span>
+        <p class="result-crop">${top.crop}</p>
+        <p class="result-condition" style="font-size:.95rem;">${top.condition}</p>
+        <div class="conf-bar-wrap" style="margin-top:.4rem;">
+          <div class="conf-bar" style="width:${top.confidence}%;background:${barColor};"></div>
+        </div>
+        <p class="conf-label ${confClass}" style="margin-top:.3rem;">${top.confidence.toFixed(1)}% confidence</p>`;
+    }
+    batchResultsEl.appendChild(card);
+  });
+
+  batchResultsEl.style.display = 'block';
+}
+
 
 dropZone.addEventListener('click', () => fileInput.click());
 dropZone.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') fileInput.click(); });
