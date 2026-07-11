@@ -130,6 +130,16 @@
     color: var(--yellow); font-size: .8rem; text-align: center;
   }
 
+  .analyze-another-btn {
+    display: block; width: 100%; margin-top: 1.5rem; padding: .8rem 1rem;
+    border-radius: .875rem; border: 1px solid var(--border); cursor: pointer;
+    background: rgba(74,222,128,0.06); color: var(--green); font-size: .9rem;
+    font-weight: 600; transition: background .15s, border-color .15s;
+  }
+  .analyze-another-btn:hover {
+    background: rgba(74,222,128,0.12); border-color: rgba(74,222,128,0.35);
+  }
+
   .treatment-btn {
     display: inline-flex; align-items: center; gap: .4rem;
     margin-top: .875rem; padding: .45rem .9rem; border-radius: .6rem;
@@ -752,6 +762,21 @@ function renderResults(data) {
     note.textContent = '⚠ Demo mode — model file not found. Place your .h5 model at Plant_Disease_Detection/plant_disease_model.h5 to get real predictions.';
     results.appendChild(note);
   }
+
+  // Reset button — lets users restart without scrolling back to the upload zone.
+  const resetBtn = document.createElement('button');
+  resetBtn.className = 'analyze-another-btn';
+  resetBtn.textContent = '↑ Analyze Another Image';
+  resetBtn.addEventListener('click', () => {
+    selectedFile = null;
+    previewImg.src = '';
+    previewWrap.style.display = 'none';
+    analyzeBtn.style.display = 'none';
+    results.style.display = 'none';
+    results.innerHTML = '';
+    dropZone.scrollIntoView({ behavior: 'smooth' });
+  });
+  results.appendChild(resetBtn);
 
   results.style.display = 'block';
 
