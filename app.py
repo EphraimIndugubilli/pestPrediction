@@ -54,8 +54,11 @@ def allowed(filename: str) -> bool:
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED
 
 
+_model_loaded_at: float | None = None
+
+
 def load_model():
-    global MODEL
+    global MODEL, _model_loaded_at
     if MODEL is not None:
         return MODEL
     if not os.path.exists(MODEL_PATH):
@@ -63,6 +66,7 @@ def load_model():
     try:
         import tensorflow as tf
         MODEL = tf.keras.models.load_model(MODEL_PATH)
+        _model_loaded_at = time.time()
         print(f"[app] Model loaded from {MODEL_PATH}")
     except Exception as e:
         print(f"[app] Could not load model: {e}")
@@ -768,6 +772,54 @@ def health():
         'model_loaded': MODEL is not None,
         'model_path': MODEL_PATH,
         'classes': len(LABELS),
+    })
+
+
+@app.route('/readiness')
+def readiness():
+    """Kubernetes-style readiness probe — 2026 cloud-native MLOps pattern.
+
+    Separates *readiness* (can this replica serve traffic?) from *liveness*
+    (is the process alive?).  A load-balancer or orchestrator sends traffic
+    to /predict only after /readiness returns 200; during model initialisation
+    it gets a 503 and the replica is kept out of rotation.
+
+    Also triggers a lazy model load so the first real predict() call does not
+    pay the cold-start penalty — a common 2026 production pattern called
+    "probe-driven warm-up."
+
+    Returns model version metadata (SHA-256 prefix of the .h5 file) so
+    deployment pipelines can confirm that the expected model version is live
+    without a separate out-of-band check.
+    """
+    import hashlib
+    load_model()
+    if MODEL is None:
+        return jsonify({
+            'ready': False,
+            'reason': 'model not loaded — check MODEL_PATH env var',
+            'model_path': MODEL_PATH,
+        }), 503
+
+    model_hash_prefix: str | None = None
+    if os.path.exists(MODEL_PATH):
+        h = hashlib.sha256()
+        try:
+            with open(MODEL_PATH, 'rb') as fh:
+                for chunk in iter(lambda: fh.read(65536), b''):
+                    h.update(chunk)
+            model_hash_prefix = h.hexdigest()[:16]
+        except OSError:
+            pass
+
+    return jsonify({
+        'ready': True,
+        'model_path': MODEL_PATH,
+        'model_classes': len(LABELS),
+        'model_hash_prefix': model_hash_prefix,
+        'loaded_at': _model_loaded_at,
+        'uptime_seconds': round(time.time() - MONITOR.started_at, 1),
+        'total_predictions': MONITOR.total_predictions,
     })
 
 
