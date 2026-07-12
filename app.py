@@ -937,6 +937,100 @@ def confidence_history():
     })
 
 
+@app.route('/crop-risk-map')
+def crop_risk_map():
+    """Aggregate recent predictions by crop type to produce a disease-risk ranking.
+
+    2026 ML observability trend: expose population-level signals for early-warning
+    dashboards. Agronomists and extension officers can poll this endpoint to see
+    which crops are currently showing the highest disease rates in the prediction
+    window — a leading indicator for targeted field inspections and spray advisories.
+
+    Query params:
+      min_samples (int, ≥1): minimum predictions a crop needs to appear (default 1)
+      limit (int, 1-100): max crops returned (default 20)
+
+    Response schema:
+      {
+        "generated_at": 1751234567.89,
+        "window_size": 200,
+        "samples_in_window": 87,
+        "crops_returned": 5,
+        "crop_risk_map": [
+          {
+            "crop": "Tomato",
+            "total": 34,
+            "disease_count": 22,
+            "healthy_count": 12,
+            "risk_rate": 64.7,
+            "risk_level": "high",
+            "top_condition": "Tomato___Late_blight",
+            "avg_confidence": 81.3
+          },
+          ...
+        ]
+      }
+    """
+    try:
+        min_samples = max(1, int(request.args.get('min_samples', 1)))
+        limit = min(100, max(1, int(request.args.get('limit', 20))))
+    except (ValueError, TypeError):
+        min_samples, limit = 1, 20
+
+    crop_data: dict = {}
+    for entry in MONITOR.history:
+        crop = entry.get('crop')
+        if not crop:
+            continue
+        if crop not in crop_data:
+            crop_data[crop] = {
+                'crop': crop,
+                'total': 0,
+                'disease_count': 0,
+                'healthy_count': 0,
+                'conditions': [],
+                'confidences': [],
+            }
+        rec = crop_data[crop]
+        rec['total'] += 1
+        rec['conditions'].append(entry.get('condition') or entry.get('raw', 'Unknown'))
+        rec['confidences'].append(entry.get('confidence', 0))
+        if entry.get('healthy'):
+            rec['healthy_count'] += 1
+        else:
+            rec['disease_count'] += 1
+
+    results = []
+    for rec in crop_data.values():
+        if rec['total'] < min_samples:
+            continue
+        risk_rate = round(rec['disease_count'] / rec['total'] * 100, 1)
+        risk_level = 'high' if risk_rate >= 60 else 'moderate' if risk_rate >= 30 else 'low'
+        condition_counts = Counter(rec['conditions'])
+        top_condition = condition_counts.most_common(1)[0][0] if condition_counts else 'Unknown'
+        avg_conf = round(sum(rec['confidences']) / len(rec['confidences']), 1) if rec['confidences'] else None
+        results.append({
+            'crop': rec['crop'],
+            'total': rec['total'],
+            'disease_count': rec['disease_count'],
+            'healthy_count': rec['healthy_count'],
+            'risk_rate': risk_rate,
+            'risk_level': risk_level,
+            'top_condition': top_condition,
+            'avg_confidence': avg_conf,
+        })
+
+    results.sort(key=lambda x: x['risk_rate'], reverse=True)
+    results = results[:limit]
+
+    return jsonify({
+        'generated_at': time.time(),
+        'window_size': MONITOR.window_size,
+        'samples_in_window': len(MONITOR.history),
+        'crops_returned': len(results),
+        'crop_risk_map': results,
+    })
+
 
 class FeedbackStore:
     """Human-in-the-loop correction tracker for 2026 MLOps best practice.
