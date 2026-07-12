@@ -80,11 +80,26 @@ def preprocess(image_bytes: bytes) -> tuple:
     orig_w, orig_h = img.size
     img = img.resize((IMG_SIZE, IMG_SIZE))
     arr = np.array(img, dtype=np.float32) / 255.0
+
+    # Aspect ratio distortion: the model always receives a square IMG_SIZE×IMG_SIZE
+    # crop, so non-square source images are squeezed.  A ratio far from 1.0 means
+    # the leaf shape has been distorted, which can reduce model accuracy.
+    orig_ratio = orig_w / orig_h if orig_h else 1.0
+    distortion_pct = round(abs(orig_ratio - 1.0) * 100, 1)
+    aspect_warning = (
+        'high' if distortion_pct > 40
+        else 'medium' if distortion_pct > 15
+        else 'none'
+    )
+
     info = {
         'original_size': f'{orig_w}×{orig_h}',
         'model_input_size': f'{IMG_SIZE}×{IMG_SIZE}',
         'file_size_kb': round(len(image_bytes) / 1024, 1),
         'normalized': True,
+        'aspect_ratio': round(orig_ratio, 2),
+        'distortion_pct': distortion_pct,
+        'aspect_warning': aspect_warning,
     }
     return np.expand_dims(arr, 0), info
 

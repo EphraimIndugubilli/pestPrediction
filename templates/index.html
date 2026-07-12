@@ -599,16 +599,27 @@ function renderResults(data) {
   const pi = data.preprocess_info;
   if (pi && pi.original_size) {
     const ppCard = document.createElement('div');
-    ppCard.style.cssText = 'background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:12px;padding:12px 16px;margin-bottom:12px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;';
+    ppCard.style.cssText = 'background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:12px;padding:12px 16px;margin-bottom:12px;flex-wrap:wrap;gap:0;';
     const items = [
       { label: 'Original size', value: pi.original_size + ' px' },
       { label: 'Model input', value: pi.model_input_size + ' px' },
       { label: 'File size', value: pi.file_size_kb + ' KB' },
       { label: 'Normalised', value: pi.normalized ? '÷255 → [0, 1]' : 'No' },
     ];
+    const warnLevel = pi.aspect_warning || 'none';
+    const warnColor = warnLevel === 'high' ? '#f87171' : warnLevel === 'medium' ? '#fbbf24' : null;
+    const warnHtml = warnColor
+      ? `<div style="margin-top:8px;padding:6px 10px;border-radius:7px;background:${warnColor}18;border:1px solid ${warnColor}50;font-size:11px;color:${warnColor};">
+           ⚠ Aspect ratio ${pi.aspect_ratio}:1 — image will be squeezed ${pi.distortion_pct}% to fit the square ${pi.model_input_size} input.
+           ${warnLevel === 'high' ? 'Consider cropping to a roughly square region around the leaf for best accuracy.' : 'Minor distortion unlikely to affect results significantly.'}
+         </div>`
+      : '';
     ppCard.innerHTML = `
-      <span style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);flex:0 0 auto;">Preprocessing</span>
-      ${items.map(it => `<span style="font-size:11.5px;color:var(--text)"><span style="color:var(--muted);margin-right:4px">${it.label}:</span>${it.value}</span>`).join('')}
+      <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+        <span style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);flex:0 0 auto;">Preprocessing</span>
+        ${items.map(it => `<span style="font-size:11.5px;color:var(--text)"><span style="color:var(--muted);margin-right:4px">${it.label}:</span>${it.value}</span>`).join('')}
+      </div>
+      ${warnHtml}
     `;
     results.appendChild(ppCard);
   }
